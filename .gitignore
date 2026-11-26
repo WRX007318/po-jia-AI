@@ -1,0 +1,12 @@
+*.gguf
+*.safetensors
+*.bin
+*.pt
+*.pth
+.env
+.env.*
+!.env.example
+.cache/
+__pycache__/
+*.log
+hardware/local/
