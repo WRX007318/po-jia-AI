@@ -1,0 +1,114 @@
+{
+  "review_date": "2026-11-27",
+  "status": "source_page_review_only",
+  "models": [
+    {
+      "id": "01",
+      "name": "DeepSeek-V4.1-Flash-1017",
+      "hf_repo": "AtomicChat/DeepSeek-V4.1-Flash-1017-Uncensored-GSQ-RCO-GGUF",
+      "source": "https://huggingface.co/AtomicChat/DeepSeek-V4.1-Flash-1017-Uncensored-GSQ-RCO-GGUF",
+      "license_label": "MIT",
+      "example_size": "IQ1_M 231 GB 总计（含 110 GB Engram）",
+      "compatibility_note": "Strata；模型卡明确说明独立 Engram 尚不受 llama.cpp 支持",
+      "tier": "大型研究",
+      "revision": null,
+      "verified_on_hardware": false
+    },
+    {
+      "id": "02",
+      "name": "GLM-5.3",
+      "hf_repo": "huihui-ai/Huihui-GLM-5.3-abliterated-GGUF",
+      "source": "https://huggingface.co/huihui-ai/Huihui-GLM-5.3-abliterated-GGUF",
+      "license_label": "MIT",
+      "example_size": "UD-IQ1_S 217 GB",
+      "compatibility_note": "引擎兼容性待核验；页面参数摘要与文件大小口径需复核",
+      "tier": "大型研究",
+      "revision": null,
+      "verified_on_hardware": false
+    },
+    {
+      "id": "03",
+      "name": "Inkling-2-Mini",
+      "hf_repo": "AtomicChat/Inkling-2-Mini-Uncensored-GGUF",
+      "source": "https://huggingface.co/AtomicChat/Inkling-2-Mini-Uncensored-GGUF",
+      "license_label": "Apache-2.0",
+      "example_size": "IQ2_M 8.67 GB；IQ3_S 13.3 GB",
+      "compatibility_note": "inkling2_loop；核验具体引擎版本及视觉组件",
+      "tier": "候选",
+      "revision": null,
+      "verified_on_hardware": false
+    },
+    {
+      "id": "04",
+      "name": "Qwen3.8-27B",
+      "hf_repo": "huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF",
+      "source": "https://huggingface.co/huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF",
+      "license_label": "Apache-2.0",
+      "example_size": "IQ2_XS 8.42 GB；TQ1_0 6.61 GB",
+      "compatibility_note": "qwen35；特殊量化及视觉组件需单独核验",
+      "tier": "候选",
+      "revision": null,
+      "verified_on_hardware": false
+    },
+    {
+      "id": "05",
+      "name": "GLM-5.3-Flash",
+      "hf_repo": "huihui-ai/Huihui-GLM-5.3-Flash-abliterated-GGUF",
+      "source": "https://huggingface.co/huihui-ai/Huihui-GLM-5.3-Flash-abliterated-GGUF",
+      "license_label": "MIT",
+      "example_size": "UD-IQ1_S 93.1 GB",
+      "compatibility_note": "glm5-next；引擎版本待核验",
+      "tier": "大型研究",
+      "revision": null,
+      "verified_on_hardware": false
+    },
+    {
+      "id": "06",
+      "name": "Hy4-flash",
+      "hf_repo": "alesha-pro/Hy4-flash-Uncensored-GGUF",
+      "source": "https://huggingface.co/alesha-pro/Hy4-flash-Uncensored-GGUF",
+      "license_label": "Tencent Hy License",
+      "example_size": "IQ2_XXS 114 GB",
+      "compatibility_note": "hy_v4_flash；视觉组件和运行时待核验",
+      "tier": "大型研究",
+      "revision": null,
+      "verified_on_hardware": false
+    },
+    {
+      "id": "07",
+      "name": "DeepSeek-V4-Pro-Qwen3.5-9B",
+      "hf_repo": "mradermacher/DeepSeek-V4-Pro-Qwen3.5-9B-UNCENSORED-heretic-GGUF",
+      "source": "https://huggingface.co/mradermacher/DeepSeek-V4-Pro-Qwen3.5-9B-UNCENSORED-heretic-GGUF",
+      "license_label": "Apache-2.0",
+      "example_size": "待核对具体分片",
+      "compatibility_note": "Qwen3.5 9B 蒸馏相关衍生模型；不是完整 DeepSeek V4 Pro",
+      "tier": "候选",
+      "revision": null,
+      "verified_on_hardware": false
+    },
+    {
+      "id": "08",
+      "name": "Gemma-4-31B-it-ARA",
+      "hf_repo": "mradermacher/gemma-4-31B-it-ARA-heretic-GGUF",
+      "source": "https://huggingface.co/mradermacher/gemma-4-31B-it-ARA-heretic-GGUF",
+      "license_label": "Apache-2.0",
+      "example_size": "Q2_K 12.0 GB；Q3_K_M 15.4 GB",
+      "compatibility_note": "视觉 mmproj 另计；基础模型和衍生许可待核验",
+      "tier": "候选",
+      "revision": null,
+      "verified_on_hardware": false
+    },
+    {
+      "id": "09",
+      "name": "Qwen3.8-Flash-Next-v2",
+      "hf_repo": "huihui-ai/Huihui-Qwen3.8-Flash-Next-abliterated-v2-GGUF",
+      "source": "https://huggingface.co/huihui-ai/Huihui-Qwen3.8-Flash-Next-abliterated-v2-GGUF",
+      "license_label": "Qwen Community 1.0",
+      "example_size": "UD-Q5_K_XL 158 GB；Q8_0 188 GB",
+      "compatibility_note": "MoE；GSQ/RCO 与 Strata 相关版本需核验",
+      "tier": "大型研究",
+      "revision": null,
+      "verified_on_hardware": false
+    }
+  ]
+}
