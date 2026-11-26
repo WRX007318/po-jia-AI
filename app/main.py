@@ -404,8 +404,9 @@ class Workbench(tk.Tk):
         self.monitor.delete("1.0","end");self.monitor.insert("end",f"GPU\n{gpu}\n\nRAM\n{mem}\n\n运行时状态\n{self.runtime.status()}\n")
 
     def close(self):
-        # The visual scheduler is deliberately detached from the GUI lifecycle.
-        self.runtime.stop();self.destroy()
+        # Model service and scheduler are independent local processes; closing
+        # this window must not stop work they already own.
+        self.destroy()
 
 
 if __name__=="__main__":

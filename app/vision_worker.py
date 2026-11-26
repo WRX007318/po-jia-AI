@@ -69,8 +69,7 @@ class Worker:
                     self.store.update_task(tid,status="paused",checkpoint=str(p))
                     self.stop.wait(.25);self.serve_once()
                 added, digest = self.store.import_image(p, source="授权本地目录")
-                if added:
-                    processed += 1
+                newly_processed=added
                 row=self.store.sample(digest[:24])
                 if row and not row["category"]:
                     annotation=self.analyze_interruptible(p)
@@ -78,15 +77,11 @@ class Worker:
                         if self.stop.is_set():
                             self.store.update_task(tid,status="stopped",processed=processed,checkpoint=checkpoint)
                             return
-                        # The pause path cancels the active HTTP request. Keep
-                        # the checkpoint in place and retry after the resume.
-                        self.store.update_task(tid,status="paused",checkpoint=checkpoint)
-                        while self.pause.is_set() and not self.stop.is_set():
-                            self.stop.wait(.25);self.serve_once()
-                        if self.stop.is_set():
-                            self.store.update_task(tid,status="stopped",processed=processed,checkpoint=checkpoint)
+                        if not self.pause.is_set():
+                            # Model failure stays resumable and never advances
+                            # the checkpoint beyond this unannotated sample.
                             return
-                        self.store.update_task(tid,status="paused",checkpoint=checkpoint)
+                        self.store.update_task(tid,status="paused",processed=processed,checkpoint=checkpoint)
                         while self.pause.is_set() and not self.stop.is_set():
                             self.stop.wait(.25);self.serve_once()
                         if self.stop.is_set():
@@ -94,10 +89,12 @@ class Worker:
                             return
                         continue
                     self.store.annotate_sample(row["id"],annotation["page_type"],annotation["ocr"],annotation["labels"],annotation["needs_human_review"])
+                    newly_processed=True
+                if newly_processed:processed+=1
                 self.store.update_task(tid, processed=processed, checkpoint=str(p), status="running")
                 checkpoint=str(p)
                 self._active_checkpoint=checkpoint
-                if added and processed >= int(task["limit_count"]):
+                if newly_processed and processed >= int(task["limit_count"]):
                     break
             except Exception as e:
                 self.store.update_task(tid, status="error", error=f"{p.name}: {e}", checkpoint=str(p))
@@ -142,6 +139,10 @@ class Worker:
                 self.run_task(queued[-1])
                 if getattr(self,"_stop_worker",False):
                     break
+                if (task:=self.store.task(queued[-1]["id"])) and task["status"]=="waiting_model":
+                    for _ in range(20):
+                        if self.stop.is_set() or self.pause.is_set():break
+                        self.stop.wait(.25);self.serve_once()
             elif queued and self.pause.is_set():
                 for task in queued:
                     self.store.update_task(task["id"], status="paused")
