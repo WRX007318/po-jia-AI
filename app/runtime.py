@@ -30,7 +30,7 @@ class Runtime:
         except Exception:
             return "stopped" if not (self.process and self.process.poll() is None) else "loading"
 
-    def start(self, gpu_layers=14, context=2048, threads=6):
+    def start(self, gpu_layers=12, context=2048, threads=6):
         if not check_model_dir():
             raise RuntimeError("模型/视觉组件未完成 SHA-256 校验，拒绝启动推理服务。")
         exe = self.root / "runtime" / "llama-server.exe"
@@ -45,7 +45,7 @@ class Runtime:
         if self.status()=="foreign":
             raise RuntimeError("59871 端口已有其他模型服务，占用本地服务地址；已拒绝使用错误模型实例。")
         threads = max(1, min(os.cpu_count() or 4, threads))
-        args = [str(exe), "-m", str(model), "--mmproj", str(mmproj), "--host", "127.0.0.1", "--port", "59871", "-ngl", str(gpu_layers), "-c", str(context), "-np", "1", "-t", str(threads), "-tb", str(threads), "--reasoning", "off", "--no-reasoning-preserve", "--metrics"]
+        args = [str(exe), "-m", str(model), "--mmproj", str(mmproj), "--host", "127.0.0.1", "--port", "59871", "-ngl", str(gpu_layers), "-c", str(context), "-np", "1", "-t", str(threads), "-tb", str(threads), "--reasoning", "off", "--reasoning-budget", "64", "--no-reasoning-preserve", "--metrics"]
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         log = self.log_path.open("ab", buffering=0)
         self.process = subprocess.Popen(args, cwd=self.root / "runtime", stdout=log, stderr=subprocess.STDOUT, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -75,7 +75,7 @@ class Runtime:
             image_data = base64.b64encode(image_path.read_bytes()).decode()
             last = msgs[-1]
             last["content"] = [{"type": "text", "text": last["content"]}, {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{image_data}"}}]
-        body = {"model": "local", "messages": msgs, "temperature": .2, "max_tokens": max_tokens, "stream": stream,"chat_template_kwargs":{"reasoning_effort":"none"}}
+        body = {"model": "local", "messages": msgs, "temperature": .2, "max_tokens": max_tokens, "stream": stream,"thinking_budget_tokens":64,"chat_template_kwargs":{"reasoning_effort":"none"}}
         if json_schema:
             body["response_format"] = {"type":"json_schema","json_schema":{"name":"page_analysis","schema":json_schema,"strict":True}}
         payload = json.dumps(body).encode()
