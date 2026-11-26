@@ -15,7 +15,7 @@ from store import Store
 from bootstrap import check_model_dir, download as download_model, install_llama
 
 APP = "破甲 AI"
-ROOT = Path(os.environ.get("POJIA_HOME", Path.home() / "PoJiaAI"))
+ROOT = Path(os.environ.get("POJIA_HOME", r"D:\PoJiaAI"))
 MODELS = ROOT / "models" / "inkling2mini"
 DATA = ROOT / "data"
 REPO = Path(__file__).resolve().parent.parent
@@ -38,7 +38,12 @@ class Workbench(tk.Tk):
         self._layout()
         self.new_session()
         self.protocol("WM_DELETE_WINDOW", self.close)
+        self.after(500, self.auto_start_runtime)
         self.after(1200, self.refresh)
+
+    def auto_start_runtime(self):
+        if (ROOT/"runtime"/"llama-server.exe").exists():
+            self.background(self.start_runtime)
 
     def _style(self):
         s = ttk.Style(self)
@@ -216,16 +221,26 @@ class Workbench(tk.Tk):
         if not prompt:return
         if self.runtime.status()!="ready":messagebox.showwarning(APP,"请先在模型管理中启动已安装的本地推理服务。");return
         self.prompt.delete("1.0","end");self.store.add_message(self.session,"user",prompt);self.render_messages();self.cancel.clear()
+        self.chat_log.configure(state="normal");self.chat_log.insert("end","破甲 AI\n");self.chat_log.configure(state="disabled")
         def run():
             try:
-                result=self.runtime.chat(self.store.messages(self.session),self.image)
+                result=[]
+                for piece in self.runtime.chat(self.store.messages(self.session),self.image,stream=True,max_tokens=512):
+                    if self.cancel.is_set():break
+                    result.append(piece)
+                    self.after(0,lambda p=piece:self._append_chat_piece(p))
+                result="".join(result)
                 self.store.add_message(self.session,"assistant",result)
-                self.after(0,self.render_messages)
+                self.after(0,lambda:self.chat_log.insert("end","\n\n"))
             except Exception as e:self.after(0,lambda:messagebox.showerror(APP,str(e)))
             self.image=None
         self.background(run)
 
+    def _append_chat_piece(self,piece):
+        self.chat_log.configure(state="normal");self.chat_log.insert("end",piece);self.chat_log.see("end");self.chat_log.configure(state="disabled")
+
     def stop_generation(self):
+        self.cancel.set()
         try:
             req=__import__("urllib.request",fromlist=["Request"]).Request(self.runtime.base+"/slots/0?action=cancel",method="POST")
             __import__("urllib.request",fromlist=["urlopen"]).urlopen(req,timeout=2).close()
@@ -241,7 +256,12 @@ class Workbench(tk.Tk):
         self.vision_result.delete("1.0","end");self.vision_result.insert("end","识别中…")
         def run():
             try:
-                out=self.runtime.chat([{"role":"user","content":"识别这张普通业务页面截图。只返回 JSON：{page_type, elements, visible_text, needs_human_review}。若含安全验证/验证码/登录挑战，needs_human_review=true，且不要描述挑战内容。"}],self.image)
+                from vision_pipeline import analyze
+                started=time.perf_counter();data=analyze(self.image)
+                added,digest=self.store.import_image(self.image,source="人工选择")
+                if added or (row:=self.store.sample(digest[:24])) and not row["category"]:
+                    self.store.annotate_sample(digest[:24],data["page_type"],data["ocr"],data["labels"],data["needs_human_review"])
+                out=json.dumps(data["raw"],ensure_ascii=False,indent=2)+f"\n\n入库：{'新样本' if added else '重复样本'}；耗时：{time.perf_counter()-started:.2f}s"
                 self.after(0,lambda:(self.vision_result.delete("1.0","end"),self.vision_result.insert("end",out)))
             except Exception as e:self.after(0,lambda:messagebox.showerror(APP,str(e)))
         self.background(run)
@@ -340,14 +360,13 @@ class Workbench(tk.Tk):
         self.store.create_task(folder,limit);self.ensure_worker();self.refresh_tasks()
 
     def worker_action(self,action):
-        state=DATA/"worker.json";state.write_text(json.dumps({"action":action}),encoding="utf-8")
+        state=DATA/"worker.json";temp=state.with_suffix(".tmp");temp.write_text(json.dumps({"action":action}),encoding="utf-8");temp.replace(state)
         if action=="resume": self.ensure_worker()
+        if action=="stop": self.worker_proc=None
         messagebox.showinfo(APP,"调度器已收到控制请求。")
 
     def stop_worker(self):
-        (DATA/"worker.json").write_text(json.dumps({"action":"stop"}),encoding="utf-8")
-        if self.worker_proc and self.worker_proc.poll() is None:self.worker_proc.terminate()
-        self.worker_proc=None
+        self.worker_action("stop_worker")
 
     def refresh_tasks(self):
         if not hasattr(self,"task_tree"):return
@@ -385,7 +404,8 @@ class Workbench(tk.Tk):
         self.monitor.delete("1.0","end");self.monitor.insert("end",f"GPU\n{gpu}\n\nRAM\n{mem}\n\n运行时状态\n{self.runtime.status()}\n")
 
     def close(self):
-        self.runtime.stop();self.stop_worker();self.destroy()
+        # The visual scheduler is deliberately detached from the GUI lifecycle.
+        self.runtime.stop();self.destroy()
 
 
 if __name__=="__main__":

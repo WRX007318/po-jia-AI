@@ -4,6 +4,8 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import shutil
+import struct
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -86,14 +88,28 @@ class Store:
                 c.execute("UPDATE tasks SET " + ",".join(f"{k}=?" for k, _ in pairs) + " WHERE id=?", [v for _, v in pairs] + [tid])
 
     def import_image(self, path: Path, source="本地文件夹") -> tuple[bool, str]:
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        h=hashlib.sha256()
+        with path.open("rb") as f:
+            header=f.read(24)
+            if path.stat().st_size>50*1024*1024:
+                raise ValueError("图片超过 50 MiB 导入上限")
+            if path.suffix.lower()==".png" and not header.startswith(b"\x89PNG\r\n\x1a\n"):
+                raise ValueError("PNG 文件头无效")
+            if path.suffix.lower() in {".jpg",".jpeg"} and not header.startswith(b"\xff\xd8"):
+                raise ValueError("JPEG 文件头无效")
+            h.update(header)
+            for block in iter(lambda:f.read(8*1024*1024),b""):h.update(block)
+        digest = h.hexdigest()
         with self.connect() as c:
             if c.execute("SELECT 1 FROM samples WHERE sha256=?", (digest,)).fetchone():
                 return False, digest
         target = self.images / f"{digest}{path.suffix.lower()}"
         if not target.exists():
-            target.write_bytes(path.read_bytes())
+            shutil.copy2(path,target)
         width = height = None
+        if path.suffix.lower()==".png":
+            with path.open("rb") as f:data=f.read(24)
+            width,height=struct.unpack(">II",data[16:24])
         try:
             from PIL import Image
             with Image.open(target) as im:
@@ -113,6 +129,15 @@ class Store:
         with self.connect() as c:
             return c.execute(sql, args).fetchall()
 
+    def sample(self,sid):
+        with self.connect() as c:return c.execute("SELECT * FROM samples WHERE id=?",(sid,)).fetchone()
+
     def update_sample(self, sid, category, labels, reviewed):
         with self.connect() as c:
             c.execute("UPDATE samples SET category=?,labels=?,reviewed=? WHERE id=?", (category, json.dumps(labels, ensure_ascii=False), int(reviewed), sid))
+
+    def annotate_sample(self, sid, category, ocr, labels, needs_human_review):
+        label_set=list(labels or [])
+        if needs_human_review:label_set.append("需要人工复核")
+        with self.connect() as c:
+            c.execute("UPDATE samples SET category=?,ocr=?,labels=?,reviewed=0 WHERE id=?", (category, ocr, json.dumps(label_set,ensure_ascii=False),sid))
