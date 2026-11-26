@@ -1,0 +1,39 @@
+{
+  "server": "ready",
+  "profile": {
+    "backend": "Vulkan",
+    "build": "b12774",
+    "gpu_layers": 12,
+    "context": 2048,
+    "threads": 6
+  },
+  "resource_snapshot": {
+    "gpu_used_mib": 8567,
+    "gpu_free_mib": 3574,
+    "gpu_util_percent": 41,
+    "available_ram_gib": 5.58,
+    "server_working_set_gib": 13.59
+  },
+  "tests": [
+    {
+      "name": "chinese_dialogue",
+      "status": "one successful separate 512-token request returned 已连通。",
+      "seconds": 86.9
+    },
+    {
+      "observed": "full run returned truncated code; smoke had later tests abort on JSON timeout",
+      "name": "code_generation",
+      "status": "failed_or_truncated"
+    },
+    {
+      "name": "structured_json",
+      "status": "failed_timeout",
+      "timeout_seconds": 240
+    },
+    {
+      "name": "image_recognition",
+      "status": "failed_timeout",
+      "timeout_seconds": 240
+    }
+  ]
+}
