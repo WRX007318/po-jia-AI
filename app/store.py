@@ -24,6 +24,7 @@ class Store:
               PRAGMA journal_mode=WAL;
               CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,title TEXT NOT NULL,created REAL NOT NULL,updated REAL NOT NULL);
               CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY,session_id TEXT NOT NULL,role TEXT NOT NULL,content TEXT NOT NULL,created REAL NOT NULL,FOREIGN KEY(session_id) REFERENCES sessions(id));
+              CREATE TABLE IF NOT EXISTS chat_drafts(session_id TEXT PRIMARY KEY,content TEXT NOT NULL,status TEXT NOT NULL,updated REAL NOT NULL,FOREIGN KEY(session_id) REFERENCES sessions(id));
               CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY,source TEXT NOT NULL,status TEXT NOT NULL,limit_count INTEGER NOT NULL,processed INTEGER NOT NULL DEFAULT 0,checkpoint TEXT,error TEXT,updated REAL NOT NULL);
               CREATE TABLE IF NOT EXISTS samples(id TEXT PRIMARY KEY,path TEXT NOT NULL,sha256 TEXT UNIQUE NOT NULL,width INTEGER,height INTEGER,source TEXT NOT NULL,category TEXT NOT NULL DEFAULT '',ocr TEXT NOT NULL DEFAULT '',labels TEXT NOT NULL DEFAULT '[]',reviewed INTEGER NOT NULL DEFAULT 0,created REAL NOT NULL);
             """)
@@ -63,6 +64,49 @@ class Store:
             now = time.time()
             c.execute("INSERT INTO messages(session_id,role,content,created) VALUES(?,?,?,?)", (sid, role, content, now))
             c.execute("UPDATE sessions SET updated=? WHERE id=?", (now, sid))
+
+    def draft(self, sid):
+        with self.connect() as c:
+            return c.execute("SELECT * FROM chat_drafts WHERE session_id=?", (sid,)).fetchone()
+
+    def begin_draft(self, sid, prompt):
+        """Commit the user message and empty answer together."""
+        with self.connect() as c:
+            now = time.time()
+            c.execute("INSERT INTO chat_drafts VALUES(?,?,'generating',?)", (sid, "", now))
+            c.execute("INSERT INTO messages(session_id,role,content,created) VALUES(?,?,?,?)", (sid, "user", prompt, now))
+            c.execute("UPDATE sessions SET updated=? WHERE id=?", (now, sid))
+
+    def save_draft(self, sid, content, status):
+        with self.connect() as c:
+            now = time.time()
+            changed = c.execute("UPDATE chat_drafts SET content=?,status=?,updated=? WHERE session_id=?", (content,status,now,sid))
+            if changed.rowcount != 1:
+                raise RuntimeError("对话草稿不存在")
+            c.execute("UPDATE sessions SET updated=? WHERE id=?", (now,sid))
+
+    def finish_draft(self, sid, content):
+        if not content.strip():
+            raise ValueError("空回答不能标为完成")
+        with self.connect() as c:
+            now = time.time()
+            changed = c.execute("DELETE FROM chat_drafts WHERE session_id=?", (sid,))
+            if changed.rowcount != 1:
+                raise RuntimeError("对话草稿不存在")
+            c.execute("INSERT INTO messages(session_id,role,content,created) VALUES(?,?,?,?)", (sid,"assistant",content,now))
+            c.execute("UPDATE sessions SET updated=? WHERE id=?", (now,sid))
+
+    def discard_draft(self, sid):
+        """Explicit user action: keep received text in history as unfinished."""
+        with self.connect() as c:
+            row = c.execute("SELECT content FROM chat_drafts WHERE session_id=?", (sid,)).fetchone()
+            if row is None:
+                return
+            now = time.time()
+            c.execute("INSERT INTO messages(session_id,role,content,created) VALUES(?,?,?,?)",
+                      (sid,"assistant",row["content"] + "\n\n[用户结束未完成的生成]",now))
+            c.execute("DELETE FROM chat_drafts WHERE session_id=?", (sid,))
+            c.execute("UPDATE sessions SET updated=? WHERE id=?", (now,sid))
 
     def create_task(self, source, limit_count):
         import uuid
