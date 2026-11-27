@@ -10,7 +10,9 @@
 powershell -ExecutionPolicy Bypass -File .\scripts\install_scrcpy.ps1
 ```
 
-脚本会将程序解压到当前用户的 `%LOCALAPPDATA%\Programs\scrcpy\scrcpy-win64-v5.0.1`，将目录加入当前用户的 PATH，并在桌面创建快捷方式。无需管理员权限。安装后新开的终端可直接运行 `scrcpy`。
+脚本会将程序解压到当前用户的 `%LOCALAPPDATA%\Programs\scrcpy\scrcpy-win64-v5.0.1`，将目录加入当前用户的 PATH，并在桌面创建 scrcpy 直启和“scrcpy 功能面板”两个快捷方式。无需管理员权限。安装后新开的终端可直接运行 `scrcpy`。
+
+功能面板可刷新设备状态、USB 投屏、无线连接并投屏、全屏启动、录屏和保存截图。录屏文件保存在“视频”目录，截图保存在“图片”目录。无线首次连接需要先插 USB、开启 USB 调试并授权，再填手机 IP；后续同网段连接可直接用无线方式。
 
 使用 USB 投屏时，在 Android 设置中开启开发者选项和 USB 调试，连接手机并在手机上确认授权，然后运行 `scrcpy`。无线连接方式和更多参数见[官方文档](https://github.com/Genymobile/scrcpy)。
 
