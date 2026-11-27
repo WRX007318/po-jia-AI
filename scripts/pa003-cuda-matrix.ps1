@@ -27,7 +27,7 @@ foreach($ctx in $Contexts){ foreach($threads in $ThreadCounts){
     'utc,free_ram_kib,gpu_memory_used_mib,gpu_memory_free_mib,gpu_utilization_pct' | Set-Content -LiteralPath $resourceLog -Encoding ascii
     $beforeRam=(Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory
     $beforeGpu=nvidia-smi --query-gpu=memory.used,memory.free,utilization.gpu --format=csv,noheader
-    $args=@('-m',$ModelPath,'--mmproj',$Mmproj,'--host','127.0.0.1','--port',"$port",'-ngl',"$GpuLayers",'-c',"$ctx",'-np','1','-t',"$threads",'-tb',"$threads",'--reasoning','off','--reasoning-budget','64','--no-reasoning-preserve','--metrics')
+    $args=@('-m',$ModelPath,'--mmproj',$Mmproj,'--host','127.0.0.1','--port',"$port",'-ngl',"$GpuLayers",'-c',"$ctx",'-np','1','-t',"$threads",'-tb',"$threads",'-fa','on','-ctk','q8_0','-ctv','q8_0','--jinja','--reasoning','off','--reasoning-budget','64','--no-reasoning-preserve','--metrics')
     if($CpuMoe -gt 0){$args += @('--n-cpu-moe',"$CpuMoe")}
     $proc=Start-Process -FilePath $ServerExe -ArgumentList $args -WorkingDirectory (Split-Path $ServerExe) -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
     $ready=$false;$failure=$null
