@@ -35,16 +35,25 @@ turns=[
 ]
 records=[]; history=[]
 for i,(prompt,expected) in enumerate(turns,1):
-    store.add_message(sid,"user",prompt); history.append({"role":"user","content":prompt})
+    # Exercise the same durable draft lifecycle used by the desktop chat UI.
+    store.begin_draft(sid,prompt); history.append({"role":"user","content":prompt})
     start=time.perf_counter(); error=None; answer=""
     try: answer=runtime.chat(history,timeout=150,max_tokens=96)
     except Exception as exc: error=f"{type(exc).__name__}: {exc}"
     elapsed=time.perf_counter()-start
     if answer:
-        store.add_message(sid,"assistant",answer);history.append({"role":"assistant","content":answer})
+        store.save_draft(sid,answer,"generating")
+        store.finish_draft(sid,answer);history.append({"role":"assistant","content":answer})
+    else:
+        # Keep the failed request as a resumable checkpoint, then reopen the
+        # store to model app restart and verify user text/checkpoint survive.
+        store.save_draft(sid,"", "failed")
+        store=Store(DATA)
+        assert store.draft(sid) is not None
+        assert store.messages(sid)[-1]["content"] == prompt
     records.append({"turn":i,"seconds":round(elapsed,3),"answer_chars":len(answer),"expected_marker":expected,"marker_present":(expected in answer if expected else None),"error":error,"answer":answer})
     print(json.dumps(records[-1],ensure_ascii=False),flush=True)
     if error: break
 history_rows=store.messages(sid)
-result={"run":"live-model","model":"IQ3_S","backend":"CUDA b12774","session_id":sid,"turns_requested":20,"turns_completed":len([r for r in records if not r['error']]),"history_messages":len(history_rows),"history_matches_completed":len(history_rows)==sum(1 for r in records if not r['error'])*2,"turn_results":records}
+result={"run":"live-model","model":"IQ3_S","backend":"CUDA b12774","session_id":sid,"turns_requested":20,"turns_completed":len([r for r in records if not r['error']]),"history_messages":len(history_rows),"draft_after_run":bool(store.draft(sid)),"history_matches_completed":len(history_rows)==sum(1 for r in records if not r['error'])*2,"turn_results":records}
 out=DATA/"pa004-live-20-turns.json";out.write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding="utf-8");print("REPORT="+str(out));
