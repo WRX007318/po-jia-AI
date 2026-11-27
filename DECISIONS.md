@@ -55,3 +55,10 @@
 - **决策：**CUDA目前是IQ3_S更快的可运行候选，但5.37 tok/s仍低于8，尚非达标生产解；需同一测试输入多轮对照和IQ2_M。视觉超时取消接口返回501，health恢复且slot空闲；记录取消链路缺口。
 - **未完成：**IQ2_M固定revision/LFS SHA256下载与测试、Reasoning变体、重复/受控CUDA-Vulkan比较、完整性能矩阵均待执行。PA-003总体验收不通过。
 - **回滚：**CUDA实例仅监听59872且本轮已停止；生产路径和桌面runtime仍是原Vulkan b12774；需要回退时重启原桌面快捷方式即可。
+
+## 2026-11-27 — IQ2_M download and matrix preparation
+
+- **状态：**已核对 NVIDIA RTX 3060 / Studio 621.40；CUDA b12774 (`171527522`) 安装在独立 `D:\PoJiaAI\runtime-cuda12-b12774`，Vulkan runtime 与逐文件备份未更动。旧的 IQ3_S CUDA 探针为 5.37 tok/s（未达 8），JSON 26.89s（该单项通过），视觉 768px 20.24s（失败）。
+- **IQ2_M：**固定 HF revision `82b34b9b0e5bc2e3e7b6d617ec8cc3e0f9692ee2`，预期长度 8,665,091,680，权重 LFS SHA256 `fca99d488bff5d401c8bc6b0110c5377c743f0ffb3a6d19c1ae4a3b9071fa2cd`。使用 Range 续传到本机 `.part`；截至记录时约 2.17 GB，仍未完整、未计算最终 SHA、不得启动或称为已部署。
+- **决策：**仅在下载长度和 LFS SHA-256 均验证后独立启动 IQ2_M 基准；桌面 `app/bootstrap.py` 仅校验 IQ3_S，因此 IQ2_M 不可冒名接入桌面 ready 判定。矩阵脚本按配置串行启停服务并写本机日志；CUDA/Vulkan 继续隔离。
+- **回滚：**`D:\PoJiaAI\runtime-vulkan-b12774-backup` 保留原 53 文件 Vulkan 构建；生产 `runtime` 路径未修改。CUDA 与 IQ2_M 基准失败时停止自身进程并返回 Vulkan。
