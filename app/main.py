@@ -187,6 +187,7 @@ class Workbench(tk.Tk):
         ttk.Button(row,text="创建本地导入任务",style="Accent.TButton",command=self.create_task).pack(side="left")
         ttk.Button(row,text="暂停",command=lambda:self.worker_action("pause")).pack(side="left",padx=6)
         ttk.Button(row,text="继续",command=lambda:self.worker_action("resume")).pack(side="left")
+        ttk.Button(row,text="恢复所选任务",command=self.recover_visual_task).pack(side="left",padx=6)
         ttk.Button(row,text="停止调度器",command=self.stop_worker).pack(side="right")
         self.task_tree=ttk.Treeview(f,columns=("source","state","count","updated"),show="headings")
         for col,text,w in [("source","来源",330),("state","状态",100),("count","已处理",100),("updated","更新时间",180)]:self.task_tree.heading(col,text=text);self.task_tree.column(col,width=w)
@@ -963,10 +964,37 @@ class Workbench(tk.Tk):
     def stop_worker(self):
         self.worker_action("stop_worker")
 
+    def recover_visual_task(self):
+        selected=self.task_tree.selection()
+        if not selected:return messagebox.showinfo(APP,"请先选择一个已中断或失败的任务。")
+        tid=selected[0];task=self.store.task(tid)
+        if not task:return self.refresh_tasks()
+        old_status=task["status"]
+        if not self.store.retry_task(tid):return messagebox.showinfo(APP,"仅可恢复失败、停止、故障隔离、等待模型或暂停任务。")
+        self.refresh_tasks()
+        if old_status=="faulted":
+            self.task_recovery_status="故障隔离任务已重新入队；等待旧推理槽排空并释放调度器后再恢复。"
+            self._ensure_worker_after_exit(40)
+        else:
+            self.worker_action("resume")
+            self.task_recovery_status="任务已从最后成功检查点重新入队；未完成图片会重试。"
+            self.ensure_worker()
+        self.refresh_tasks()
+        messagebox.showinfo(APP,self.task_recovery_status)
+
+    def _ensure_worker_after_exit(self,attempts_left):
+        if self.worker_proc and self.worker_proc.poll() is None:
+            if attempts_left<=0:
+                self.task_recovery_status="旧 Worker 仍保持故障隔离；请确认模型服务已空闲后再次恢复。"
+                return
+            self.after(500,lambda:self._ensure_worker_after_exit(attempts_left-1))
+            return
+        self.ensure_worker()
+
     def refresh_tasks(self):
         if not hasattr(self,"task_tree"):return
         for i in self.task_tree.get_children():self.task_tree.delete(i)
-        for t in self.store.tasks():self.task_tree.insert("","end",values=(Path(t["source"]).name,t["status"],t["processed"],time.strftime("%Y-%m-%d %H:%M",time.localtime(t["updated"]))))
+        for t in self.store.tasks():self.task_tree.insert("","end",iid=t["id"],values=(Path(t["source"]).name,t["status"],t["processed"],time.strftime("%Y-%m-%d %H:%M",time.localtime(t["updated"]))))
 
     def refresh_samples(self):
         if not hasattr(self,"sample_tree"):return

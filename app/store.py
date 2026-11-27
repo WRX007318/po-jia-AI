@@ -169,6 +169,14 @@ class Store:
         with self.connect() as c:
             return c.execute("SELECT * FROM tasks ORDER BY updated DESC").fetchall()
 
+    def retry_task(self,tid):
+        """Requeue an interrupted task without advancing or erasing its recovery cursors."""
+        with self.connect() as c:
+            row=c.execute("SELECT status FROM tasks WHERE id=?",(tid,)).fetchone()
+            if not row or row["status"] not in {"error","stopped","faulted","waiting_model","paused"}:return False
+            c.execute("UPDATE tasks SET status='queued',error=NULL,updated=? WHERE id=?",(time.time(),tid))
+            return True
+
     def update_task(self, tid, **fields):
         allowed = {"status", "processed", "checkpoint", "success_checkpoint", "current_image", "error"}
         pairs = [(k, v) for k, v in fields.items() if k in allowed]

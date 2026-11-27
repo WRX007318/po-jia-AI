@@ -1,0 +1,31 @@
+{
+  "run_id": "20261127T125028Z-5c91b117a3",
+  "scope": "PA-006 visual task recovery and desktop computer-agent source verification",
+  "created_utc": "2026-11-27T12:50:28Z",
+  "automated": {
+    "unittest_discover": "passed",
+    "tests_run": 63,
+    "compileall_app_tests": "passed",
+    "git_diff_check": "passed",
+    "worker_task_recovery": "passed: explicit retry preserves success_checkpoint, current_image, and unique processed count; reopened Store resumes the incomplete image",
+    "computer_agent_isolated_sequence": "passed: create, edit, read back and compare in a temporary workspace with one-time approval for each mutation"
+  },
+  "source_changes": {
+    "visual_task_ui": "added explicit recover-selected-task control; queueing retains the last successful and current-image cursors",
+    "fault_isolation": "recovery waits for isolated Worker exit after inference slot is confirmed idle",
+    "computer_agent_ui": "plans up to eight immutable typed requests; previews all; creates concrete scoped plan just in time; asks user separately for each mutation; stops on first failure and pauses if next-step scope validation fails"
+  },
+  "desktop_live_acceptance": {
+    "status": "not_run",
+    "user_handoff": "deferred at user's request until current desktop interaction is finished",
+    "task_recovery_button": "not clicked in live desktop",
+    "computer_agent_sequence": "not run in live desktop"
+  },
+  "production_model": {
+    "new_sample": false,
+    "latest_reported_vram_sample_mib": 10675,
+    "sample_run_id": "20261127T123803Z-60c93a22ef",
+    "cuda_vulkan_parameter_matrix": "not run",
+    "acceptance": "incomplete"
+  }
+}

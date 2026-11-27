@@ -137,7 +137,7 @@ class StoreWorkerTests(unittest.TestCase):
             self.assertFalse(failed["success_checkpoint"])
             self.assertEqual(failed["current_image"],str(image))
             self.assertEqual(failed["processed"],0)
-            resumed=Store(root/"db");resumed.update_task(tid,status="queued",error=None)
+            resumed=Store(root/"db");self.assertTrue(resumed.retry_task(tid))
             annotation={"page_type":"业务页","ocr":"恢复后成功","labels":["普通"],"needs_human_review":False}
             with patch("vision_worker.urllib.request.urlopen",return_value=health),patch("vision_worker.analyze",return_value=annotation):
                 Worker(root/"db").run_task(Store(root/"db").task(tid))
@@ -147,6 +147,19 @@ class StoreWorkerTests(unittest.TestCase):
             self.assertIsNone(complete["current_image"])
             self.assertEqual(complete["processed"],1)
             self.assertEqual(recovered.samples()[0]["ocr"],"恢复后成功")
+
+    def test_explicit_task_retry_preserves_success_and_current_image(self):
+        with tempfile.TemporaryDirectory() as td:
+            store=Store(Path(td));tid=store.create_task("source",3)
+            store.update_task(tid,status="error",processed=1,checkpoint="last-ok.png",success_checkpoint="last-ok.png",current_image="retry.png",error="timeout")
+            self.assertTrue(store.retry_task(tid))
+            task=Store(Path(td)).task(tid)
+            self.assertEqual(task["status"],"queued");self.assertEqual(task["error"],None)
+            self.assertEqual(task["processed"],1);self.assertEqual(task["success_checkpoint"],"last-ok.png")
+            self.assertEqual(task["current_image"],"retry.png")
+            self.assertFalse(store.retry_task("missing"))
+            store.update_task(tid,status="completed")
+            self.assertFalse(store.retry_task(tid))
 
     def test_pause_and_stop_do_not_advance_success_cursor(self):
         for action in ("pause","stop"):
