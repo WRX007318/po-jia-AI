@@ -3,7 +3,7 @@ from __future__ import annotations
 import json, pathlib, sys, time
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"app"))
-from runtime import Runtime
+from runtime import Runtime, build_context
 from store import Store
 
 HOME=pathlib.Path(r"D:\PoJiaAI")
@@ -38,7 +38,7 @@ for i,(prompt,expected) in enumerate(turns,1):
     # Exercise the same durable draft lifecycle used by the desktop chat UI.
     store.begin_draft(sid,prompt); history.append({"role":"user","content":prompt})
     start=time.perf_counter(); error=None; answer=""
-    try: answer=runtime.chat(history,timeout=150,max_tokens=96)
+    try: answer=runtime.chat(build_context(history,12000),timeout=240,max_tokens=192)
     except Exception as exc: error=f"{type(exc).__name__}: {exc}"
     elapsed=time.perf_counter()-start
     if answer:
