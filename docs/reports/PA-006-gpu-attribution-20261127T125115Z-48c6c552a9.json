@@ -1,0 +1,27 @@
+{
+  "run_id": "20261127T125115Z-48c6c552a9",
+  "scope": "Read-only WDDM GPU memory attribution while IQ2_M desktop service remained active",
+  "created_utc": "2026-11-27T12:51:15Z",
+  "hardware": {
+    "driver": "621.40",
+    "gpu": "RTX 3060 12GB",
+    "nvidia_smi_memory_used_mib": 10696,
+    "nvidia_smi_memory_total_mib": 12288,
+    "gpu_utilization_percent": 16
+  },
+  "windows_gpu_process_memory_counter_mib": {
+    "llama-server.exe PID 2568": 9859.6,
+    "NVIDIA Overlay.exe PID 15712": 1349.6,
+    "dwm.exe PID 1416": 266.1,
+    "ChatGPT.exe PID 2344": 115.2,
+    "other_top_processes": "Each below 110 MiB; see local Windows GPU Process Memory\\Dedicated Usage counter for attribution."
+  },
+  "model_command": "IQ2_M CUDA; -ngl 99; context 4096; threads 4; Q8 K/V; flash attention on; mmproj offload",
+  "interpretation": "The model service is the largest consumer. The WDDM per-process dedicated-usage counter and nvidia-smi device total are different accounting views and are not summed as if they were equivalent.",
+  "action": "Read-only inspection only. No application was stopped, no model settings were changed, and no parameter matrix was run.",
+  "acceptance": {
+    "vram_target_9500_10500_mib": "failed at this sample: device total 10696 MiB",
+    "generation_speed_after_vram_tuning": "not tested",
+    "cuda_vulkan_comparison": "not tested"
+  }
+}
