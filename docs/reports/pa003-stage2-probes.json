@@ -1,0 +1,45 @@
+{
+  "profile": {
+    "backend": "Vulkan",
+    "build": "b12774",
+    "quant": "IQ3_S",
+    "gpu_layers": 99,
+    "cpu_moe": 23,
+    "context": 4096,
+    "threads": 6,
+    "threads_batch": 6,
+    "flash_attention": "on",
+    "kv_cache": "q8_0",
+    "mmproj_offload": true,
+    "reasoning_budget_tokens": 64
+  },
+  "gates": {
+    "text_generation_tokens_per_second": 8,
+    "json_seconds": 30,
+    "vision_seconds": 20
+  },
+  "tests": [
+    {
+      "name": "chinese_short_answer",
+      "gate_seconds": null,
+      "status": "returned",
+      "seconds": 22.73,
+      "output": "是的，破甲 AI 推理性能测试通过。",
+      "gate_passed": true
+    },
+    {
+      "name": "structured_json",
+      "gate_seconds": 30,
+      "status": "failed",
+      "seconds": 30.012,
+      "error": "TimeoutError: timed out"
+    },
+    {
+      "name": "synthetic_vision",
+      "gate_seconds": 20,
+      "status": "failed",
+      "seconds": 20.004,
+      "error": "TimeoutError: timed out"
+    }
+  ]
+}

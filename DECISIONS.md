@@ -15,3 +15,11 @@
 - **决策：**在阶段 1 暂以 CPU MoE 23 作为可运行目标显存配置，进入阶段 2；它明确未达到 8 tok/s，阶段 7 IQ2_M 路径必须保留。首次 8 层因显存超上限，反向增加 CPU MoE 层数重测；理由是 GPU 只剩约 210 MiB，不安全且违反资源目标。`--fit` 对用户设置 `-ngl 99` 报告无法自动拟合，不依赖自动回调。
 - **回滚：**阶段 2 若失败，停掉候选服务并回到 PA-002 `-ngl 12 -c 2048 -t 6 -tb 6 --reasoning-budget 64`；保留 Vulkan build、IQ3_S 和驱动。
 - **原始证据：**`D:\PoJiaAI\logs\pa003\stage1-ncmoe{8,16,23,24}*.log` 及 err 日志；仅本机保存。
+
+## 2026-11-27 — Stage 2 engine parameters
+
+- **实测参数：**`-ngl 99 --n-cpu-moe 23 --mmproj-offload -fa on --cache-type-k q8_0 --cache-type-v q8_0 -c 4096 -t 6 -tb 6 -np 1 --jinja --reasoning-budget 64`。模型服务启动正常，视觉投影上下文有 Vulkan compute buffer；KV buffer 合计 304 MiB。
+- **结果：**短中文回答 4.77 tok/s，低于目标；JSON 超过30秒，图片超过20秒，两者均取消并记录失败。配置没有达到目标，不能用 4K/Q8 作为阶段验收完成理由。
+- **决策：**保留该失败配置作为阶段 3 引擎比较基线；驱动/引擎切换需基于官方最低驱动要求、离线回滚材料和 PA-002 Vulkan 启动配置，升级不成功可恢复 Vulkan。
+- **回滚：**保持 IQ3_S、本机 b12774 Vulkan；可回到 PA-002 12/2048/6，或阶段1目标显存参数 99/23/2048/6。
+- **原始证据：**仅本机 `D:\PoJiaAI\logs\pa003\stage2-iq3s-ncmoe23-ctx4096-q8-fa.*.log`。
