@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"app"))
-from runtime import IncompleteGeneration, iter_answer
+from runtime import IncompleteGeneration, iter_answer, build_context
 from store import Store
 
 
@@ -26,6 +26,18 @@ class StreamIntegrityTests(unittest.TestCase):
         with self.assertRaises(IncompleteGeneration) as cm:
             next(stream)
         self.assertEqual(cm.exception.reason,"length")
+
+    def test_context_window_preserves_first_constraint_and_latest_turn(self):
+        messages=[{"role":"user","content":"必须使用中文并保留约束。"}]
+        for i in range(20):
+            messages.extend([{"role":"assistant","content":f"较早回答{i}。"+"甲"*400},
+                             {"role":"user","content":f"问题{i}。"+"乙"*200}])
+        before=list(messages)
+        selected=build_context(messages,1200)
+        self.assertEqual(messages,before)  # durable history input is untouched
+        self.assertIn(messages[0],selected)
+        self.assertIn(messages[-1],selected)
+        self.assertLessEqual(sum(len(m["content"]) for m in selected),1200)
 
     def test_disconnect_after_visible_content(self):
         stream=iter_answer([event({"content":"partial"}),event(finish="stop")])

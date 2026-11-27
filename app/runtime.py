@@ -56,6 +56,40 @@ def iter_answer(response):
         raise IncompleteGeneration("empty_final_answer")
 
 
+def build_context(messages, max_chars=12000):
+    """Build a bounded prompt without mutating or deleting durable history.
+
+    Preserve system messages and the earliest user constraints, then include
+    the newest complete turns that fit. Character count is a conservative UI
+    budget estimate, not a tokenizer measurement.
+    """
+    if max_chars < 1000:
+        raise ValueError("上下文字符预算至少为 1000")
+    copied = [{"role": m["role"], "content": m["content"]} for m in messages]
+    systems = [m for m in copied if m["role"] == "system"]
+    turns = [m for m in copied if m["role"] != "system"]
+    if not turns:
+        return systems
+    first_user = next((m for m in turns if m["role"] == "user"), turns[0])
+    latest_user = next((m for m in reversed(turns) if m["role"] == "user"), turns[-1])
+    selected = []
+    used = sum(len(m["content"]) for m in systems)
+    pinned = [first_user] if first_user is not latest_user else []
+    for msg in pinned:
+        if msg not in selected:
+            selected.append(msg); used += len(msg["content"])
+    tail = []
+    for msg in reversed(turns):
+        if msg in selected:
+            continue
+        size = len(msg["content"])
+        if used + size > max_chars and (tail or msg is not latest_user):
+            continue
+        tail.append(msg); used += size
+    ordered = sorted({id(m): m for m in selected + list(reversed(tail))}.values(), key=turns.index)
+    return systems + ordered
+
+
 class Runtime:
     def __init__(self, root: Path, models: Path):
         self.root, self.models = root, models

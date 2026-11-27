@@ -11,7 +11,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
-from runtime import Runtime, IncompleteGeneration
+from runtime import Runtime, IncompleteGeneration, build_context
 from store import Store
 from bootstrap import check_model_dir, download as download_model, install_llama
 
@@ -97,6 +97,12 @@ class Workbench(tk.Tk):
         ttk.Button(bar,text="结束未完成回答",command=self.end_draft).pack(side="left")
         self.chat_status=tk.StringVar(value="就绪")
         ttk.Label(f,textvariable=self.chat_status,wraplength=850).pack(anchor="w")
+        budget=ttk.Frame(f);budget.pack(fill="x",pady=(0,6))
+        ttk.Label(budget,text="上下文字符预算").pack(side="left")
+        self.context_budget=tk.IntVar(value=12000)
+        ttk.Spinbox(budget,from_=1000,to=48000,increment=1000,width=8,textvariable=self.context_budget,command=self.update_context_estimate).pack(side="left",padx=6)
+        self.context_usage=tk.StringVar(value="估算：0 字符（约 0 tokens）")
+        ttk.Label(budget,textvariable=self.context_usage,style="Sub.TLabel").pack(side="left",padx=8)
         self.chat_log=tk.Text(f,wrap="word",bg="white",bd=0,padx=18,pady=16,font=("Microsoft YaHei UI",10),state="disabled")
         self.chat_log.pack(fill="both",expand=True)
         bottom=ttk.Frame(f);bottom.pack(fill="x",pady=(12,0))
@@ -243,6 +249,7 @@ class Workbench(tk.Tk):
 
     def render_messages(self):
         if not hasattr(self,"chat_log"):return
+        self.update_context_estimate()
         self.chat_log.configure(state="normal");self.chat_log.delete("1.0","end")
         for m in self.store.messages(self.session):
             self.chat_log.insert("end",("你" if m["role"]=="user" else "破甲 AI")+"\n"+m["content"]+"\n\n")
@@ -254,6 +261,21 @@ class Workbench(tk.Tk):
         elif not self.chat_active:
             self.chat_status.set("就绪")
         self.chat_log.configure(state="disabled");self.chat_log.see("end")
+
+    def update_context_estimate(self):
+        if not hasattr(self,"context_usage") or not self.session:return
+        try:
+            messages=[dict(m) for m in self.store.messages(self.session)]
+            if self.store.draft(self.session):
+                messages.append({"role":"assistant","content":self.store.draft(self.session)["content"]})
+            budget=max(1000,min(48000,int(self.context_budget.get())))
+            selected=build_context(messages,budget)
+            chars=sum(len(m["content"]) for m in selected)
+            # Chinese-heavy prompts vary by tokenizer; show a range, not a false exact count.
+            low=(chars+3)//4;high=chars
+            self.context_usage.set(f"当前请求窗口：{chars}/{budget} 字符；估算 {low}–{high} tokens（非 tokenizer 精确值）")
+        except (ValueError,tk.TclError):
+            self.context_usage.set("上下文预算无效")
 
     def chat_image(self):
         if self.chat_active:return
@@ -328,8 +350,7 @@ class Workbench(tk.Tk):
                     return
                 self.store.save_draft(sid,content,"generating")
                 self.chat_events.put((sid,"status","生成中…"))
-                # Preserve all original history for now: context budgeting and
-                # automatic summarization are separate PA-004 work items.
+                messages=build_context(messages,max(1000,min(48000,int(self.context_budget.get()))))
                 stream=self.runtime.chat(messages,image,stream=True,max_tokens=512,timeout=120)
                 try:
                     for piece in stream:
