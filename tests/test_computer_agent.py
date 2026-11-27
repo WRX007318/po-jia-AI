@@ -10,7 +10,7 @@ from computer_agent import ComputerAgent, ToolRejected
 class ComputerAgentTests(unittest.TestCase):
     def test_write_requires_one_time_explicit_approval_and_stays_in_workspace(self):
         with tempfile.TemporaryDirectory() as td:
-            root=Path(td);agent=ComputerAgent(root)
+            root=Path(td);agent=ComputerAgent(root);agent.begin_task()
             plan=agent.plan("write_text",{"path":"notes.txt","content":"UIA smoke test"})
             with self.assertRaisesRegex(ToolRejected,"审批"):
                 agent.execute(plan.id)
@@ -30,7 +30,7 @@ class ComputerAgentTests(unittest.TestCase):
 
     def test_paths_and_action_schema_are_restricted(self):
         with tempfile.TemporaryDirectory() as td:
-            root=Path(td);agent=ComputerAgent(root)
+            root=Path(td);agent=ComputerAgent(root);agent.begin_task()
             with self.assertRaisesRegex(ToolRejected,"越出"):
                 agent.plan("read_text",{"path":"../outside.txt"})
             with self.assertRaisesRegex(ToolRejected,"不支持"):
@@ -40,10 +40,18 @@ class ComputerAgentTests(unittest.TestCase):
             with self.assertRaisesRegex(ToolRejected,"1 MiB"):
                 agent.plan("write_text",{"path":"large.txt","content":"x"*(1_000_001)})
 
+    def test_independent_tool_permissions_are_enforced_by_executor(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td);(root/"a.txt").write_text("read",encoding="utf-8")
+            agent=ComputerAgent(root,allowed_actions={"read_text"});agent.begin_task()
+            self.assertEqual(agent.execute(agent.plan("read_text",{"path":"a.txt"}).id),"read")
+            with self.assertRaisesRegex(ToolRejected,"独立工具权限"):
+                agent.plan("write_text",{"path":"a.txt","content":"no"})
+
     def test_allowlisted_launch_and_window_controls_require_review(self):
         with tempfile.TemporaryDirectory() as td:
             root=Path(td);fake=root/"safe-test.exe";fake.write_bytes(b"MZ")
-            agent=ComputerAgent(root);app_id=agent.add_allowed_app(fake)
+            agent=ComputerAgent(root);agent.begin_task();app_id=agent.add_allowed_app(fake)
             plan=agent.plan("launch_app",{"app_id":app_id,"document":None})
             self.assertTrue(plan.mutating)
             with self.assertRaisesRegex(ToolRejected,"white|白名单"):
@@ -52,7 +60,7 @@ class ComputerAgentTests(unittest.TestCase):
     def test_per_task_step_budget(self):
         with tempfile.TemporaryDirectory() as td:
             root=Path(td);(root/"a.txt").write_text("a",encoding="utf-8")
-            agent=ComputerAgent(root,max_steps=1)
+            agent=ComputerAgent(root,max_steps=1);agent.begin_task()
             first=agent.plan("read_text",{"path":"a.txt"})
             self.assertEqual(agent.execute(first.id),"a")
             second=agent.plan("read_text",{"path":"a.txt"})
@@ -61,6 +69,55 @@ class ComputerAgentTests(unittest.TestCase):
             agent.begin_task()
             third=agent.plan("read_text",{"path":"a.txt"})
             self.assertEqual(agent.execute(third.id),"a")
+
+    def test_plan_arguments_are_immutable_and_approval_dies_on_pause(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td);agent=ComputerAgent(root);agent.begin_task()
+            plan=agent.plan("write_text",{"path":"a.txt","content":"original"})
+            leaked=plan.args;leaked["content"]="tampered"
+            self.assertEqual(plan.args["content"],"original")
+            ticket=agent.approve(plan.id,True)
+            self.assertTrue(agent.pause())
+            self.assertEqual(agent.state,"paused")
+            self.assertTrue(agent.resume())
+            with self.assertRaisesRegex(ToolRejected,"不存在|已失效"):
+                agent.execute(ticket,approval_ticket=ticket)
+
+    def test_checkpoint_resume_and_workspace_binding(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td);checkpoint=root/"agent.json";agent=ComputerAgent(root,checkpoint_path=checkpoint)
+            agent.begin_task();agent.steps=3;agent.pause()
+            restored=ComputerAgent(root,checkpoint_path=checkpoint)
+            self.assertTrue(restored.restore_checkpoint())
+            self.assertEqual((restored.state,restored.steps),("paused",3))
+            with tempfile.TemporaryDirectory() as other:
+                foreign=ComputerAgent(Path(other),checkpoint_path=checkpoint)
+                with self.assertRaisesRegex(ToolRejected,"工作目录"):
+                    foreign.restore_checkpoint()
+
+    def test_audit_chain_detects_manual_tampering_and_records_approved_effect(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td);checkpoint=root/"state"/"agent.json"
+            agent=ComputerAgent(root,checkpoint_path=checkpoint);agent.begin_task()
+            plan=agent.plan("write_text",{"path":"note.txt","content":"approved"})
+            ticket=agent.approve(plan.id,True)
+            agent.execute(ticket,approval_ticket=ticket)
+            audit=checkpoint.parent/"computer-agent-audit.jsonl"
+            records=[__import__("json").loads(line) for line in audit.read_text(encoding="utf-8").splitlines()]
+            self.assertIn("plan_approved",[row["event"] for row in records])
+            self.assertIn("operation_succeeded",[row["event"] for row in records])
+            audit.write_text(audit.read_text(encoding="utf-8").replace("operation_succeeded","tampered"),encoding="utf-8")
+            with self.assertRaisesRegex(ToolRejected,"审计日志"):
+                ComputerAgent(root,checkpoint_path=checkpoint)
+
+    def test_revoking_app_invalidates_plans_and_stops_future_steps(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td);fake=root/"safe-test.exe";fake.write_bytes(b"MZ")
+            agent=ComputerAgent(root);agent.begin_task();app_id=agent.add_allowed_app(fake)
+            plan=agent.plan("launch_app",{"app_id":app_id,"document":None})
+            self.assertTrue(agent.revoke_app(app_id))
+            with self.assertRaisesRegex(ToolRejected,"计划不存在"):
+                agent.execute(plan.id)
 
 
 if __name__=="__main__":unittest.main()

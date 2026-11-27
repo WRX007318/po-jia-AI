@@ -21,7 +21,7 @@ started=time.perf_counter();content=runtime.chat(messages,timeout=90,max_tokens=
 elapsed=time.perf_counter()-started;plan=json.loads(content)
 if plan!={"action":"list_windows","args":{}}:raise SystemExit("model plan did not match the read-only test request")
 with tempfile.TemporaryDirectory(prefix="pojia-plan-smoke-") as td:
-    agent=ComputerAgent(Path(td));approved_plan=agent.plan(plan["action"],plan["args"])
+    agent=ComputerAgent(Path(td));agent.begin_task();approved_plan=agent.plan(plan["action"],plan["args"])
     result=agent.execute(approved_plan.id)
 print(json.dumps({"model":"local IQ3_S CUDA","seconds":round(elapsed,3),"action":plan["action"],
                   "schema_valid":True,"tool_result_count":len(result),"steps":agent.steps},ensure_ascii=False))

@@ -42,7 +42,7 @@ def main():
         except Exception:pass
 
     with tempfile.TemporaryDirectory(prefix="pojia-uia-smoke-") as td:
-        root=Path(td);agent=ComputerAgent(root,max_steps=12);app_id=agent.add_allowed_app(notepad);window_id=None
+        root=Path(td);agent=ComputerAgent(root,max_steps=12);agent.begin_task();app_id=agent.add_allowed_app(notepad);window_id=None
         try:
             launch=approved(agent,"launch_app",{"app_id":app_id,"document":None})
             deadline=time.time()+15;window=None
