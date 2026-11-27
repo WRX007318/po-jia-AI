@@ -6,6 +6,7 @@
 - The full request sequence is previewed, but execution advances only after one explicit user click per step. Each mutating operation gets its own short-lived approval bound to the concrete plan; executor scope and paths are revalidated immediately before effect. A failed, paused, revoked, or stopped task clears all remaining plans. The sequence is not persisted as executable approvals; after pause/restart, the user must replan remaining work.
 - Backend regression exercises two approved workspace writes, a subsequent readback, step-budget rejection, and all-or-nothing validation failure. GUI interaction and cross-restart sequence continuation remain unverified pending safe desktop handoff.
 - Visual task rows now have an explicit recovery action for interrupted/faulted tasks. Requeue preserves the success cursor and current in-progress image; a fault-isolated Worker is allowed to confirm the inference slot idle and exit before the desktop starts its replacement process.
+- The production vision pipeline now reads `/props` before and after inference, rejects unknown GGUF identity and rejects a model change during recognition. Identity lookup counts toward the same 20-second end-to-end budget. Unit tests cover unknown identity before request and identity change after response; live verification of this added guard is pending.
 
 ## 2026-11-27 — PA-006 visual cursor and cancellation isolation
 

@@ -41,7 +41,8 @@ class VisionStreamTests(unittest.TestCase):
 
     def call_stream(self,response,slots=None,drain=.2):
         slots=slots or [{"is_processing":False}]
-        with patch("app.vision_pipeline.tesseract_ocr",return_value=""),patch("app.vision_pipeline.urllib.request.urlopen",side_effect=[response,JsonResponse(slots),JsonResponse({"model_path":"D:/fixture/IQ2.gguf"})]):
+        props=JsonResponse({"model_path":"D:/fixture/Inkling-2-Mini-Uncensored-AD-IQ2_M.gguf"})
+        with patch("app.vision_pipeline.tesseract_ocr",return_value=""),patch("app.vision_pipeline.urllib.request.urlopen",side_effect=[props,response,JsonResponse(slots),JsonResponse({"model_path":"D:/fixture/Inkling-2-Mini-Uncensored-AD-IQ2_M.gguf"})]):
             return analyze(FIXTURE,timeout=20,cancel_event=threading.Event(),slot_drain_timeout=drain)
 
     def test_complete_stream_requires_stop_and_done_marker(self):
@@ -56,11 +57,30 @@ class VisionStreamTests(unittest.TestCase):
         response=sse_response()
         def urlopen(url,*_args,**_kwargs):
             if hasattr(url,"full_url"):url=url.full_url
+            if str(url).endswith("/props"):return JsonResponse({"model_path":"D:/fixture/Inkling-2-Mini-Uncensored-AD-IQ2_M.gguf"})
             if str(url).endswith("/slots"):return JsonResponse([{"is_processing":True}])
             return response
         with patch("app.vision_pipeline.tesseract_ocr",return_value=""),patch("app.vision_pipeline.urllib.request.urlopen",side_effect=urlopen),patch("app.vision_pipeline.time.sleep"):
             with self.assertRaisesRegex(InferenceIsolationError,"模型槽在 .* 秒内仍未确认空闲"):
                 analyze(FIXTURE,timeout=20,cancel_event=threading.Event(),slot_drain_timeout=.05)
+
+    def test_unknown_loaded_model_is_rejected_before_visual_request(self):
+        with patch("app.vision_pipeline.urllib.request.urlopen",return_value=JsonResponse({"model_path":"D:/fixture/other-model.gguf"})) as request:
+            with self.assertRaisesRegex(RuntimeError,"拒绝写入"):
+                analyze(FIXTURE,timeout=20)
+            self.assertEqual(request.call_count,1)
+
+    def test_model_identity_change_after_inference_rejects_annotation(self):
+        response=sse_response()
+        props=[JsonResponse({"model_path":"D:/fixture/Inkling-2-Mini-Uncensored-AD-IQ2_M.gguf"}),JsonResponse({"model_path":"D:/fixture/Inkling-2-Mini-Uncensored-AD-IQ3_S.gguf"})]
+        def urlopen(url,*_args,**_kwargs):
+            if hasattr(url,"full_url"):url=url.full_url
+            if str(url).endswith("/props"):return props.pop(0)
+            if str(url).endswith("/slots"):return JsonResponse([{"is_processing":False}])
+            return response
+        with patch("app.vision_pipeline.tesseract_ocr",return_value=""),patch("app.vision_pipeline.urllib.request.urlopen",side_effect=urlopen):
+            with self.assertRaisesRegex(RuntimeError,"身份发生变化"):
+                analyze(FIXTURE,timeout=20,cancel_event=threading.Event())
 
 
 if __name__=="__main__":unittest.main()

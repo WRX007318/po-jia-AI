@@ -1,0 +1,29 @@
+{
+  "run_id": "20261127T125408Z-87b49c4a20",
+  "scope": "PA-006 strict production visual model-identity guard source verification",
+  "created_utc": "2026-11-27T12:54:08Z",
+  "automated": {
+    "unittest_discover": "passed",
+    "tests_run": 65,
+    "compileall_app_tests": "passed",
+    "git_diff_check": "passed",
+    "unknown_model_rejected_before_inference": "passed",
+    "model_change_after_inference_rejected_before_result_commit": "passed",
+    "model_identity_lookup_within_20_second_budget": "implemented; unit validation of recognition budget retained"
+  },
+  "live_desktop": {
+    "status": "not_run",
+    "actual_model_identity_recheck": "not run against live llama-server after this change",
+    "visual_database_commit_with_identity_guard": "not run against live service after this change"
+  },
+  "production_gpu": {
+    "latest_nvidia_smi_mib": 10696,
+    "latest_attribution_run_id": "20261127T125115Z-48c6c552a9",
+    "gpu_target": "not met at latest observed sample"
+  },
+  "limitations": [
+    "Tests in this report validate rejection logic in automated fixtures only; no live model output is claimed.",
+    "User has deferred desktop control until their current interaction is complete.",
+    "PA-006 end-to-end acceptance remains incomplete."
+  ]
+}

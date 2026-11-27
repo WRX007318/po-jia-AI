@@ -16,6 +16,7 @@ from service_endpoint import service_base
 BASE=service_base()
 API=BASE+"/v1/chat/completions"
 SCHEMA={"type":"object","properties":{"page_type":{"type":"string"},"visible_text":{"type":"array","maxItems":4,"items":{"type":"string"}},"elements":{"type":"array","maxItems":2,"items":{"type":"object","properties":{"type":{"type":"string"},"text":{"type":"string"},"label":{"type":"string"}},"required":["type","text","label"],"additionalProperties":False}},"labels":{"type":"array","maxItems":3,"items":{"type":"string"}},"needs_human_review":{"type":"boolean"}},"required":["page_type","visible_text","elements","labels","needs_human_review"],"additionalProperties":False}
+SUPPORTED_MODELS={"Inkling-2-Mini-Uncensored-AD-IQ2_M.gguf","Inkling-2-Mini-Uncensored-AD-IQ3_S.gguf"}
 
 
 class IncompleteVisualResponse(RuntimeError):
@@ -69,10 +70,18 @@ def analyze(path:Path,timeout=360,lease_path:Path|None=None,lease_held=False,can
         left=deadline-time.monotonic()
         if left<=0:raise TimeoutError("OCR、视觉推理及结果校验总耗时超过 20 秒")
         return left
+    def loaded_model_name():
+        with urllib.request.urlopen(BASE+"/props",timeout=min(2,remaining())) as r:props=json.load(r)
+        raw=props.get("model_path")
+        name=str(raw or "").replace("\\","/").rsplit("/",1)[-1]
+        if name not in SUPPORTED_MODELS:raise RuntimeError("无法确认当前加载的是受支持的 Inkling 2 GGUF 模型；拒绝写入视觉标注")
+        remaining()
+        return name
     if path.stat().st_size>50*1024*1024:raise ValueError("图片超过识别大小限制")
     if cancel_event and cancel_event.is_set():raise InterruptedError("视觉推理已取消")
     ext=path.suffix.lower();mime={".png":"image/png",".jpg":"image/jpeg",".jpeg":"image/jpeg",".webp":"image/webp",".bmp":"image/bmp"}.get(ext)
     if not mime:raise ValueError("不支持的图片类型")
+    model_name=loaded_model_name()
     image=base64.b64encode(path.read_bytes()).decode("ascii")
     local_ocr=tesseract_ocr(path,timeout=min(15,remaining()))
     if cancel_event and cancel_event.is_set():raise InterruptedError("视觉推理已取消")
@@ -139,11 +148,9 @@ def analyze(path:Path,timeout=360,lease_path:Path|None=None,lease_held=False,can
     _validate_schema(result)
     remaining()
     ocr=merge_ocr_text(local_ocr,result["visible_text"])
-    try:
-        with urllib.request.urlopen(BASE+"/props",timeout=min(2,remaining())) as r:loaded=Path(json.load(r).get("model_path","" )).name
-    except Exception:loaded="unknown local model"
+    if loaded_model_name()!=model_name:raise RuntimeError("视觉推理期间活动模型身份发生变化；拒绝入库")
     remaining()
-    return {"page_type":result["page_type"],"ocr":ocr,"elements":result["elements"],"labels":result["labels"],"needs_human_review":result["needs_human_review"],"model":loaded,"raw":result}
+    return {"page_type":result["page_type"],"ocr":ocr,"elements":result["elements"],"labels":result["labels"],"needs_human_review":result["needs_human_review"],"model":model_name,"raw":result}
 
 
 def _validate_schema(value):
