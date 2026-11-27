@@ -38,3 +38,11 @@
 - **决策：**独立探针新增 `--probe` 选项，支持单独运行 text / reasoning / json / vision，并可传入 768px 图片；不得改 `app/` 业务代码。对照任务书 reasoning 参数顺序，并记录完整 backend content 与 `\n\n` 分隔符，而非仅隐藏或截断字符串。
 - **验证：**`python -m py_compile tests/run_pa003_probes.py`、`--help` 和 `git diff --check` 成功；这些属于脚本检查，不是模型验收。由于驱动安装器要求人工交互、模型备用启动未就绪，Stage 4/5 的 PA-003 推理尚未重新实测，视觉/Reasoning 仍为待运行。
 - **回滚：**探针更改独立于 `app/`；启动失败时停止唯一 PA-003 进程，保留 PA-002 运行时及原有应用。
+
+## 2026-11-27 — Driver update and safe inference follow-up
+
+- **新状态证据：**随后本机 NVIDIA 安装完成；`nvidia-smi` 显示 610.88，设备 INF `oem30.inf`、DriverVersion `32.0.16.1088`，系统无需手动重启即可识别更新。未确认旧 512.15 是否仍可通过 Device Manager 回滚；原导出的 INF 与 Vulkan 备份仍在。
+- **运行时资产：**b12774 release 链接的 CUDA 12.4 x64 ZIP HEAD 返回 200，长度 391,443,627；本地完整下载 SHA256 `8C79A9B226DE4B3CACFD1F83D24F962D0773BE79F1E7B75C6AF4DED7E32AE1D6`，ZIP 可列出 `cublas64_12.dll`、`cublasLt64_12.dll`、`cudart64_12.dll`。GitHub API 限流，尚无独立资产 SHA256 与上游对照；不能据本地哈希声称来源端校验完成。提取试验受后台负载影响中止，未保留不完整目录或改写生产 runtime。
+- **Reasoning 实测：**原桌面启动的 PA-002 Vulkan 服务仍为 PID 15928/父进程 `launch.pyw`，未停止。直接流式请求传入 `chat_template_kwargs.reasoning_effort=none`，64-token 上限在 25.76s 完成但结束原因 `length`；仅收到 reasoning_content、final content 为空，reasoning 约 2.61 tok/s，判失败/截断。不是最终答案，不计通过。
+- **资源/安全决策：**该用户窗口服务仍占 GPU 约8.4GiB、进程工作集约12GiB；不停止用户拥有的服务，也不并行装载测试模型。一个额外的由本轮启动的 b12774 Vulkan 加载实例曾停留在 health 503，随后仅停止该实例。Reasoning 对比、JSON/图像768px、CUDA 对比及完整阶段6–8矩阵仍未完成。
+- **回滚：**生产服务未替换，生产 runtime 未动；CUDA 文件不部署。保留 `D:\PoJiaAI\runtime-vulkan-b12774-backup` 与旧 INF 导出。选择性验证需由用户先关闭桌面“破甲 AI”窗口，或另安排低负载维护时段；不得擅杀其进程。
