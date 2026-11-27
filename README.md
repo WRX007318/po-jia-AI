@@ -17,6 +17,7 @@
 - [授权核查](licenses/README.md)
 - [安全与数据边界](security/README.md)
 - [脚本规划](scripts/README.md)
+- [Windows 工具：scrcpy 安卓投屏](tools/scrcpy/README.md)
 - [研究记录](docs/README.md)
 
 下一阶段：根据本地硬件报告筛选模型，核对上游版本与文件清单后，才决定实际部署。仓库为公开资源索引，请勿提交个人信息、凭据或大模型权重。
