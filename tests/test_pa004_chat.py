@@ -39,6 +39,14 @@ class StreamIntegrityTests(unittest.TestCase):
         self.assertIn(messages[-1],selected)
         self.assertLessEqual(sum(len(m["content"]) for m in selected),1200)
 
+    def test_context_window_refuses_to_silently_drop_constraints_or_current_prompt(self):
+        with self.assertRaisesRegex(ValueError,"首轮用户约束"):
+            build_context([{"role":"user","content":"约束"+"甲"*1200}],1200)
+        with self.assertRaisesRegex(ValueError,"当前问题"):
+            build_context([{"role":"user","content":"约束"},
+                           {"role":"assistant","content":"历史"*600},
+                           {"role":"user","content":"最新问题"*600}],1200)
+
     def test_disconnect_after_visible_content(self):
         stream=iter_answer([event({"content":"partial"}),event(finish="stop")])
         self.assertEqual(next(stream),"partial")

@@ -75,6 +75,8 @@ def build_context(messages, max_chars=12000):
     selected = []
     used = sum(len(m["content"]) for m in systems)
     pinned = [first_user] if first_user is not latest_user else []
+    if len(first_user["content"]) > max_chars:
+        raise ValueError("首轮用户约束超过上下文预算；请提高预算或新建对话，未自动裁剪约束。")
     for msg in pinned:
         if msg not in selected:
             selected.append(msg); used += len(msg["content"])
@@ -83,6 +85,8 @@ def build_context(messages, max_chars=12000):
         if msg in selected:
             continue
         size = len(msg["content"])
+        if msg is latest_user and used + size > max_chars:
+            raise ValueError("当前问题与固定约束超过上下文预算；请提高预算或缩短问题。")
         if used + size > max_chars and (tail or msg is not latest_user):
             continue
         tail.append(msg); used += size
