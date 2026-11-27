@@ -12,6 +12,50 @@ from pathlib import Path
 from bootstrap import check_model_dir
 
 
+class IncompleteGeneration(RuntimeError):
+    """A request ended without a complete final answer."""
+    def __init__(self, reason: str):
+        self.reason = reason
+        super().__init__(f"生成未完成（{reason}）")
+
+
+def iter_answer(response):
+    """Yield visible text only; require an explicit successful final event."""
+    finish = None
+    done = False
+    produced = False
+    for raw in response:
+        line = raw.decode("utf-8").strip()
+        if not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if data == "[DONE]":
+            done = True
+            break
+        if not data:
+            continue
+        event = json.loads(data)
+        if event.get("error"):
+            raise IncompleteGeneration("server_error")
+        choices = event.get("choices") or []
+        if not choices:
+            continue  # usage/timings-only event
+        choice = choices[0]
+        finish = choice.get("finish_reason") or finish
+        piece = (choice.get("delta") or {}).get("content") or ""
+        if piece:
+            if not isinstance(piece, str):
+                raise IncompleteGeneration("invalid_content")
+            produced = produced or bool(piece.strip())
+            yield piece
+    if finish != "stop":
+        raise IncompleteGeneration(finish or "stream_disconnected")
+    if not done:
+        raise IncompleteGeneration("stream_disconnected")
+    if not produced:
+        raise IncompleteGeneration("empty_final_answer")
+
+
 class Runtime:
     def __init__(self, root: Path, models: Path):
         self.root, self.models = root, models
@@ -83,25 +127,19 @@ class Runtime:
         if stream:
             return self._stream_request(req, timeout)
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            message=json.load(r)["choices"][0]["message"]
+            choice=json.load(r)["choices"][0]
+            if choice.get("finish_reason") != "stop":
+                raise IncompleteGeneration(choice.get("finish_reason") or "missing_finish_reason")
+            message=choice["message"]
             content=message.get("content") or ""
-            if not content.strip():
-                raise RuntimeError(f"模型没有生成最终回答（reasoning_content={len(message.get('reasoning_content') or '')} 字符）；请提升生成上限或检查 Inkling chat template。")
+            if not isinstance(content,str) or not content.strip():
+                raise IncompleteGeneration("empty_final_answer")
             return content
 
     @staticmethod
     def _stream_request(req, timeout):
         with urllib.request.urlopen(req, timeout=timeout) as response:
-            produced=False;finish=""
-            for line in response:
-                line=line.decode("utf-8",errors="replace").strip()
-                if not line.startswith("data:") or line=="data: [DONE]":continue
-                event=json.loads(line[5:])
-                choice=event["choices"][0];finish=choice.get("finish_reason") or finish
-                piece=choice.get("delta",{}).get("content") or ""
-                if piece:produced=True;yield piece
-            if not produced:
-                raise RuntimeError(f"模型没有生成最终回答（finish_reason={finish or 'unknown'}）；reasoning trace 不能当作回答。")
+            yield from iter_answer(response)
 
 
 def verify_hash(path: Path, expected: str):
