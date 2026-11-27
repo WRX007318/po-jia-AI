@@ -13,6 +13,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from runtime import Runtime, IncompleteGeneration, build_context, continuation_overlap
 from store import Store
+from settings_store import SettingsStore, DEFAULTS as DEFAULT_SETTINGS
 from bootstrap import check_model_dir, download as download_model, install_llama
 
 APP = "破甲 AI"
@@ -30,6 +31,11 @@ class Workbench(tk.Tk):
         self.minsize(960, 650)
         self.configure(bg="#f6f7fb")
         self.store = Store(DATA)
+        self.settings_store=SettingsStore(DATA/"settings")
+        try:
+            self.settings=self.settings_store.load();self.settings_error=None
+        except ValueError as exc:
+            self.settings=dict(DEFAULT_SETTINGS);self.settings_error=str(exc)
         self.runtime = Runtime(ROOT, MODELS)
         self.session = None
         self.image = None
@@ -99,14 +105,14 @@ class Workbench(tk.Tk):
         ttk.Label(f,textvariable=self.chat_status,wraplength=850).pack(anchor="w")
         budget=ttk.Frame(f);budget.pack(fill="x",pady=(0,6))
         ttk.Label(budget,text="上下文字符预算").pack(side="left")
-        self.context_budget=tk.IntVar(value=12000)
+        self.context_budget=tk.IntVar(value=self.settings["context_budget_chars"])
         ttk.Spinbox(budget,from_=1000,to=48000,increment=1000,width=8,textvariable=self.context_budget,command=self.update_context_estimate).pack(side="left",padx=6)
         self.context_usage=tk.StringVar(value="估算：0 字符（约 0 tokens）")
         ttk.Label(budget,textvariable=self.context_usage,style="Sub.TLabel").pack(side="left",padx=8)
-        self.auto_continue=tk.BooleanVar(value=False)
+        self.auto_continue=tk.BooleanVar(value=self.settings["auto_continue"])
         ttk.Checkbutton(budget,text="长度截断后自动续写（仅文字）",variable=self.auto_continue,
                         command=self.update_context_estimate).pack(side="left",padx=(12,4))
-        self.auto_continue_limit=tk.IntVar(value=2)
+        self.auto_continue_limit=tk.IntVar(value=self.settings["auto_continue_limit"])
         ttk.Spinbox(budget,from_=1,to=4,width=3,textvariable=self.auto_continue_limit).pack(side="left")
         ttk.Label(budget,text="次上限",style="Sub.TLabel").pack(side="left",padx=4)
         self.chat_log=tk.Text(f,wrap="word",bg="white",bd=0,padx=18,pady=16,font=("Microsoft YaHei UI",10),state="disabled")
@@ -199,6 +205,20 @@ class Workbench(tk.Tk):
         ttk.Label(f,text=f"数据目录：{DATA}").pack(anchor="w",pady=4)
         ttk.Label(f,text=f"运行时目录：{ROOT}").pack(anchor="w",pady=4)
         ttk.Button(f,text="打开数据目录",command=lambda:os.startfile(DATA)).pack(anchor="w",pady=8)
+        ttk.Label(f,text="角色与行为（保存后下一轮生效；权限安全边界不可在此编辑）").pack(anchor="w",pady=(4,3))
+        self.system_prompt_editor=tk.Text(f,height=4,wrap="word",font=("Microsoft YaHei UI",9))
+        self.system_prompt_editor.pack(fill="x")
+        self.system_prompt_editor.insert("1.0",self.settings["system_prompt"])
+        behavior=ttk.Frame(f);behavior.pack(fill="x",pady=5)
+        ttk.Label(behavior,text="上下文预算字符").pack(side="left")
+        ttk.Spinbox(behavior,from_=1000,to=48000,increment=1000,width=8,textvariable=self.context_budget).pack(side="left",padx=5)
+        ttk.Checkbutton(behavior,text="允许文字自动续写",variable=self.auto_continue).pack(side="left",padx=8)
+        ttk.Label(behavior,text="续写次数上限").pack(side="left")
+        ttk.Spinbox(behavior,from_=1,to=4,width=3,textvariable=self.auto_continue_limit).pack(side="left",padx=5)
+        ttk.Button(behavior,text="校验并应用",command=self.apply_behavior_settings).pack(side="left",padx=6)
+        ttk.Button(behavior,text="回滚上一版",command=self.rollback_behavior_settings).pack(side="left")
+        self.settings_status=tk.StringVar(value=self.settings_error or f"配置版本 {self.settings['revision']}；自动续写默认按用户选择运行。")
+        ttk.Label(f,textvariable=self.settings_status,style="Sub.TLabel",wraplength=820).pack(anchor="w",pady=3)
         ttk.Label(f,text="长期记忆（仅保存你明确添加的内容；校正会保留旧版本）").pack(anchor="w",pady=(8,3))
         self.memory_list=tk.Listbox(f,height=5,exportselection=False)
         self.memory_list.pack(fill="x")
@@ -237,6 +257,35 @@ class Workbench(tk.Tk):
         selected=self.memory_list.curselection()
         if not selected:return messagebox.showinfo(APP,"请先选择一条记忆。")
         self.store.deactivate_memory(self._memory_ids[selected[0]]);self.refresh_memories()
+
+    def apply_behavior_settings(self):
+        candidate={"schema_version":1,"revision":self.settings.get("revision",0),
+                   "system_prompt":self.system_prompt_editor.get("1.0","end").strip(),
+                   "context_budget_chars":self.context_budget.get(),
+                   "auto_continue":self.auto_continue.get(),
+                   "auto_continue_limit":self.auto_continue_limit.get()}
+        try:
+            self.settings=self.settings_store.save(candidate);self.settings_error=None
+            self.system_prompt=self.settings["system_prompt"]
+            self.settings_status.set(f"已应用版本 {self.settings['revision']}；角色指令从下一轮生效。")
+            self.update_context_estimate()
+        except (ValueError,OSError,tk.TclError) as exc:
+            self.settings_status.set(f"配置无效，旧版本仍在使用：{exc}")
+            messagebox.showerror(APP,str(exc))
+
+    def rollback_behavior_settings(self):
+        try:
+            self.settings=self.settings_store.rollback()
+            self.system_prompt_editor.delete("1.0","end")
+            self.system_prompt_editor.insert("1.0",self.settings["system_prompt"])
+            self.system_prompt=self.settings["system_prompt"]
+            self.context_budget.set(self.settings["context_budget_chars"])
+            self.auto_continue.set(self.settings["auto_continue"])
+            self.auto_continue_limit.set(self.settings["auto_continue_limit"])
+            self.settings_status.set(f"已回滚并应用为新版本 {self.settings['revision']}。")
+            self.update_context_estimate()
+        except (ValueError,OSError) as exc:
+            messagebox.showerror(APP,str(exc))
 
     def show(self,key):
         for p in self.pages.values():p.pack_forget()
@@ -398,8 +447,10 @@ class Workbench(tk.Tk):
                                      {"role":"user","content":"从上一段未完成回答的断点接着写，只输出后续内容，保留原任务约束，不重复已经写过的段落。"}]
                     query=next((m["content"] for m in reversed(messages) if m["role"]=="user"),"")
                     memories=self.store.relevant_memories(query)
+                    system_prompt=getattr(self,"system_prompt",self.settings["system_prompt"])
+                    messages.insert(0,{"role":"system","content":system_prompt})
                     if memories:
-                        messages.insert(0,{"role":"system","content":"以下是用户确认的长期记忆，仅在与当前请求相关时使用；如与当前明确指令冲突，以当前指令为准：\n- " + "\n- ".join(memories)})
+                        messages.insert(1,{"role":"system","content":"以下是用户确认的长期记忆，仅在与当前请求相关时使用；如与当前明确指令冲突，以当前指令为准：\n- " + "\n- ".join(memories)})
                     budget=max(1000,min(48000,int(self.context_budget.get())))
                     messages=build_context(messages,budget)
                     label=(f"续写中（{continuation_count}/{continuation_limit}）…"
