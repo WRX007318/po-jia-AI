@@ -11,8 +11,10 @@ import time
 import urllib.request
 from pathlib import Path
 from inference_lock import InferenceLease
+from service_endpoint import service_base
 
-API="http://127.0.0.1:59871/v1/chat/completions"
+BASE=service_base()
+API=BASE+"/v1/chat/completions"
 SCHEMA={"type":"object","properties":{"page_type":{"type":"string"},"visible_text":{"type":"array","maxItems":4,"items":{"type":"string"}},"elements":{"type":"array","maxItems":2,"items":{"type":"object","properties":{"type":{"type":"string"},"text":{"type":"string"},"label":{"type":"string"}},"required":["type","text","label"],"additionalProperties":False}},"labels":{"type":"array","maxItems":3,"items":{"type":"string"}},"needs_human_review":{"type":"boolean"}},"required":["page_type","visible_text","elements","labels","needs_human_review"],"additionalProperties":False}
 
 
@@ -30,6 +32,8 @@ def analyze(path:Path,timeout=360,lease_path:Path|None=None,lease_held=False,can
     if cancel_event and cancel_event.is_set():raise InterruptedError("视觉推理已取消")
     ext=path.suffix.lower();mime={".png":"image/png",".jpg":"image/jpeg",".jpeg":"image/jpeg",".webp":"image/webp",".bmp":"image/bmp"}.get(ext)
     if not mime:raise ValueError("不支持的图片类型")
+    started=time.monotonic()
+    if timeout > 20: timeout=20
     image=base64.b64encode(path.read_bytes()).decode("ascii")
     local_ocr=tesseract_ocr(path)
     if cancel_event and cancel_event.is_set():raise InterruptedError("视觉推理已取消")
@@ -82,17 +86,33 @@ def analyze(path:Path,timeout=360,lease_path:Path|None=None,lease_held=False,can
                 # even when cancellation raises out of the response loop.
                 while True:
                     try:
-                        with urllib.request.urlopen("http://127.0.0.1:59871/slots",timeout=2) as slot_response:slots=json.load(slot_response)
+                        with urllib.request.urlopen(BASE+"/slots",timeout=2) as slot_response:slots=json.load(slot_response)
                         if not any(item.get("is_processing") for item in slots):break
                     except Exception:
                         try:
-                            with urllib.request.urlopen("http://127.0.0.1:59871/health",timeout=2):pass
+                            with urllib.request.urlopen(BASE+"/health",timeout=2):pass
                         except Exception:break
                     time.sleep(.1)
+    if time.monotonic()-started >= 20:raise TimeoutError("视觉处理超过 20 秒验收门槛")
     result=json.loads(raw)
-    if not isinstance(result.get("visible_text"),list) or not isinstance(result.get("elements"),list):raise ValueError("视觉模型返回结构不符合要求")
+    _validate_schema(result)
     ocr=local_ocr or "\n".join(result["visible_text"])
     try:
-        with urllib.request.urlopen("http://127.0.0.1:59871/props",timeout=2) as r:loaded=Path(json.load(r).get("model_path","" )).name
+        with urllib.request.urlopen(BASE+"/props",timeout=2) as r:loaded=Path(json.load(r).get("model_path","" )).name
     except Exception:loaded="unknown local model"
     return {"page_type":result["page_type"],"ocr":ocr,"elements":result["elements"],"labels":result["labels"],"needs_human_review":result["needs_human_review"],"model":loaded,"raw":result}
+
+
+def _validate_schema(value):
+    """Validate the complete strict annotation schema without optional packages."""
+    def fail(path, expected):raise ValueError(f"视觉JSON Schema不匹配：{path} 应为 {expected}")
+    if not isinstance(value,dict):fail("$","object")
+    required=set(SCHEMA["required"])
+    if set(value)!=required:fail("$ keys", "exactly "+", ".join(sorted(required)))
+    if not isinstance(value["page_type"],str):fail("$.page_type","string")
+    if not isinstance(value["visible_text"],list) or len(value["visible_text"])>4 or any(not isinstance(x,str) for x in value["visible_text"]):fail("$.visible_text","array<string> maxItems=4")
+    if not isinstance(value["elements"],list) or len(value["elements"])>2:fail("$.elements","array maxItems=2")
+    for i,item in enumerate(value["elements"]):
+        if not isinstance(item,dict) or set(item)!={"type","text","label"} or any(not isinstance(item[k],str) for k in item):fail(f"$.elements[{i}]","strict element object")
+    if not isinstance(value["labels"],list) or len(value["labels"])>3 or any(not isinstance(x,str) for x in value["labels"]):fail("$.labels","array<string> maxItems=3")
+    if not isinstance(value["needs_human_review"],bool):fail("$.needs_human_review","boolean")

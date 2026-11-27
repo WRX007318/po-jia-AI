@@ -13,6 +13,7 @@ import secrets
 import shutil
 import subprocess
 import time
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -71,6 +72,7 @@ class ComputerAgent:
         self.allowed_actions=set(self.ACTION_ARGS if allowed_actions is None else allowed_actions)
         if self.allowed_actions-set(self.ACTION_ARGS):raise ValueError("工具权限包含未知操作")
         self.audit_path=(Path(checkpoint_path).parent/"computer-agent-audit.jsonl") if checkpoint_path else None
+        self._gate_lock=threading.RLock()
         self._audit("agent_initialized",{"workspace":str(self.workspace)})
 
     def _audit(self,event: str,details: dict):
@@ -97,6 +99,20 @@ class ComputerAgent:
         with self.audit_path.open("a",encoding="utf-8",newline="\n") as handle:
             handle.write(json.dumps(record,ensure_ascii=False,sort_keys=True)+"\n")
             handle.flush();os.fsync(handle.fileno())
+
+    def _prevalidate_audit(self):
+        """Fail closed before any operation if the protected audit chain is invalid."""
+        if self.audit_path is None or not self.audit_path.exists():return
+        previous="0"*64
+        try:
+            for line in self.audit_path.read_text(encoding="utf-8").splitlines():
+                item=json.loads(line);saved=item.pop("hash")
+                if item.get("previous_hash")!=previous:raise ToolRejected("审计日志哈希链不连续；拒绝执行 Agent 操作")
+                canonical=json.dumps(item,ensure_ascii=False,sort_keys=True,separators=(",",":"))
+                if hashlib.sha256(canonical.encode("utf-8")).hexdigest()!=saved:raise ToolRejected("审计日志校验失败；拒绝执行 Agent 操作")
+                previous=saved
+        except ToolRejected:raise
+        except Exception as exc:raise ToolRejected("审计日志不可读取；拒绝执行 Agent 操作") from exc
 
     def begin_task(self):
         self.steps=0;self.plans.clear();self.approved.clear();self.plan_expiry.clear()
@@ -154,19 +170,23 @@ class ComputerAgent:
     def set_allowed_actions(self,actions):
         selected=set(actions)
         if selected-set(self.ACTION_ARGS):raise ToolRejected("不能启用未知工具")
-        self.allowed_actions=selected;self.plans.clear();self.approved.clear();self.plan_expiry.clear()
+        with self._gate_lock:
+            self.allowed_actions=selected;self.plans.clear();self.approved.clear();self.plan_expiry.clear()
         self._audit("tool_permissions_changed",{"enabled_tools":sorted(selected)})
 
     def revoke_app(self, app_id: str):
-        if app_id not in self.apps:return False
-        del self.apps[app_id];self._audit("app_revoked",{"app_id_hash":hashlib.sha256(app_id.encode()).hexdigest()})
-        self.plans.clear();self.approved.clear();self.plan_expiry.clear()
+        with self._gate_lock:
+            if app_id not in self.apps:return False
+            del self.apps[app_id];self.plans.clear();self.approved.clear();self.plan_expiry.clear()
+            if self.state=="running":self.state="paused"
+        self._audit("app_revoked",{"app_id_hash":hashlib.sha256(app_id.encode()).hexdigest()});self._save_checkpoint()
         return True
 
     def revoke_all(self):
-        self.apps.clear();self.plans.clear();self.approved.clear();self.plan_expiry.clear()
-        self.cancel_requested=True
-        if self.state=="running":self.state="paused"
+        with self._gate_lock:
+            self.apps.clear();self.plans.clear();self.approved.clear();self.plan_expiry.clear()
+            self.cancel_requested=True
+            if self.state=="running":self.state="paused"
         self._audit("all_apps_revoked",{});self._save_checkpoint()
 
     def plan(self, action: str, args: dict) -> Plan:
@@ -244,27 +264,30 @@ class ComputerAgent:
         return ticket
 
     def execute(self, plan_id: str, approval_ticket: str | None = None):
-        self._expire_plans()
-        if self.state!="running" or self.cancel_requested:
-            raise ToolRejected(f"任务当前状态为 {self.state}，已拒绝执行")
-        if self.steps >= self.max_steps:
-            raise ToolRejected("已达到本任务最大操作步数")
-        plan = self.plans.get(plan_id)
-        if plan is None:
-            # Approved plans use the ticket as their one-time plan ID.
-            plan = next((p for p in self.plans.values() if p.id == plan_id), None)
-        if plan is None:
-            raise ToolRejected("计划不存在、已执行或已失效")
-        if plan.mutating:
-            approval=self.approved.get(approval_ticket)
-            if approval_ticket!=plan.id or not approval or approval[0]!=plan.id or approval[1]!=plan.binding:
-                raise ToolRejected("变更操作缺少绑定当前不可变计划参数的一次性审批")
-        current_window=self._window_identity(plan.args["window_id"]) if plan.action in {"inspect_window","read_control_text","click_control","type_text"} else None
-        if self._scope_for(plan.action,plan.args,current_window)!=plan.scope_fingerprint:
-            raise ToolRejected("授权工作区、目标进程或对象状态已变化；审批与计划失效")
-        # Revalidate all path, app, and control bounds immediately before effect.
-        self._describe(plan.action,plan.args)
-        self.steps += 1
+        with self._gate_lock:
+            self._prevalidate_audit()
+            self._expire_plans()
+            if self.state!="running" or self.cancel_requested:
+                raise ToolRejected(f"任务当前状态为 {self.state}，已拒绝执行")
+            if self.steps >= self.max_steps:raise ToolRejected("已达到本任务最大操作步数")
+            plan=self.plans.get(plan_id)
+            if plan is None:plan=next((p for p in self.plans.values() if p.id==plan_id),None)
+            if plan is None:raise ToolRejected("计划不存在、已执行或已失效")
+            if action:=plan.action:
+                if action not in self.allowed_actions:raise ToolRejected("该工具权限已撤销")
+            if plan.mutating:
+                approval=self.approved.get(approval_ticket)
+                if approval_ticket!=plan.id or not approval or approval[0]!=plan.id or approval[1]!=plan.binding:
+                    raise ToolRejected("变更操作缺少绑定当前不可变计划参数的一次性审批")
+            current_window=self._window_identity(plan.args["window_id"]) if plan.action in {"inspect_window","read_control_text","click_control","type_text"} else None
+            if self._scope_for(plan.action,plan.args,current_window)!=plan.scope_fingerprint:raise ToolRejected("授权工作区、目标进程或对象状态已变化；审批与计划失效")
+            self._describe(plan.action,plan.args)
+            # Consume the approval atomically before entering the side-effecting executor.
+            if approval_ticket:self.approved.pop(approval_ticket,None)
+            self.plans.pop(plan_id,None)
+            self.plan_expiry.pop(plan_id,None)
+            self.steps+=1
+            self._audit("operation_started",{"plan_id":plan.id,"action":plan.action,"step":self.steps})
         try:
             result = self._run(plan.action, plan.args)
             self._audit("operation_succeeded",{"plan_id":plan.id,"action":plan.action,"step":self.steps,"result_hash":hashlib.sha256(json.dumps(result,ensure_ascii=False,default=str,sort_keys=True).encode()).hexdigest()})
@@ -279,7 +302,6 @@ class ComputerAgent:
         finally:
             self.plans.pop(plan_id, None)
             self.plan_expiry.pop(plan_id,None)
-            if approval_ticket:self.approved.pop(approval_ticket,None)
             if approval_ticket:self.approved.pop(approval_ticket,None)
         return result
 

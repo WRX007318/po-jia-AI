@@ -14,6 +14,9 @@ from pathlib import Path
 from store import Store
 from vision_pipeline import analyze
 from inference_lock import InferenceLease
+from service_endpoint import service_base
+
+BASE=service_base()
 
 
 class Worker:
@@ -44,7 +47,7 @@ class Worker:
             self.store.update_task(tid, status="error", error="本地来源目录不存在")
             return
         try:
-            with urllib.request.urlopen("http://127.0.0.1:59871/health",timeout=2):pass
+            with urllib.request.urlopen(BASE+"/health",timeout=2):pass
         except Exception:
             self.store.update_task(tid,status="waiting_model",error="等待本机模型服务；任务检查点已保留")
             return
@@ -97,6 +100,9 @@ class Worker:
                 self._active_checkpoint=checkpoint
                 if newly_processed and processed >= int(task["limit_count"]):
                     break
+            except TimeoutError as e:
+                self.store.update_task(self._active_task,status="error",error=str(e),checkpoint=self._active_checkpoint)
+                return None
             except Exception as e:
                 self.store.update_task(tid, status="error", error=f"{p.name}: {e}", checkpoint=str(p))
                 return
@@ -116,9 +122,14 @@ class Worker:
             pool=concurrent.futures.ThreadPoolExecutor(max_workers=1)
             try:
                 future=pool.submit(analyze,path,120,None,True,cancel_request)
-                retry=False;cancel_sent=False
+                retry=False;cancel_sent=False;started=time.monotonic()
                 while not future.done():
                     self.stop.wait(.15);self.serve_once()
+                    if time.monotonic()-started>20 and not cancel_sent:
+                        cancel_request.set();cancel_sent=True
+                        self.store.update_task(self._active_task,status="error",error="视觉处理超过 20 秒验收门槛；检查点保留",checkpoint=self._active_checkpoint)
+                        retry=False
+                        raise TimeoutError("视觉处理超过 20 秒验收门槛")
                     if (self.stop.is_set() or self.pause.is_set()) and not cancel_sent:
                         cancel_request.set()
                         cancel_sent=True

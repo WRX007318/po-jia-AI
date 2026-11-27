@@ -13,6 +13,7 @@ import urllib.request
 from pathlib import Path
 from bootstrap import DEFAULT_MODEL, VISION_PROJECTOR, check_model_dir
 from inference_lock import InferenceLease
+from service_endpoint import service_base
 
 
 MODEL_PROFILES = {
@@ -151,7 +152,7 @@ class Runtime:
         self.root, self.models = root, models
         self.set_profile(profile_id)
         self.process = None
-        self.base = "http://127.0.0.1:59871"
+        self.base = service_base()
         self.log_path = root / "logs" / "llama-server.log"
 
     def set_profile(self, profile_id):
@@ -203,7 +204,9 @@ class Runtime:
         threads = self.profile["threads"] if threads is None else threads
         threads = max(1, min(os.cpu_count() or 4, threads))
         threads_batch = self.profile["threads_batch"]
-        args = [str(exe), "-m", str(model), "--mmproj", str(mmproj), "--host", "127.0.0.1", "--port", "59871", "-ngl", str(gpu_layers)]
+        from urllib.parse import urlsplit
+        endpoint=urlsplit(self.base)
+        args = [str(exe), "-m", str(model), "--mmproj", str(mmproj), "--host", endpoint.hostname or "127.0.0.1", "--port", str(endpoint.port), "-ngl", str(gpu_layers)]
         if self.profile["cpu_moe"] is not None:
             args += ["--n-cpu-moe", str(self.profile["cpu_moe"])]
         args += ["-c", str(context), "-np", "1", "-t", str(threads), "-tb", str(threads_batch), *self.profile["extra"], "--reasoning", "off", "--reasoning-budget", "64", "--no-reasoning-preserve", "--metrics"]

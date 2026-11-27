@@ -116,8 +116,18 @@ class ComputerAgentTests(unittest.TestCase):
             agent=ComputerAgent(root);agent.begin_task();app_id=agent.add_allowed_app(fake)
             plan=agent.plan("launch_app",{"app_id":app_id,"document":None})
             self.assertTrue(agent.revoke_app(app_id))
-            with self.assertRaisesRegex(ToolRejected,"计划不存在"):
+            with self.assertRaisesRegex(ToolRejected,"paused"):
                 agent.execute(plan.id)
+
+    def test_execute_prevalidates_audit_and_consumes_ticket_atomically(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td);checkpoint=root/"state"/"agent.json";agent=ComputerAgent(root,checkpoint_path=checkpoint)
+            agent.begin_task();plan=agent.plan("write_text",{"path":"approved.txt","content":"safe"})
+            ticket=agent.approve(plan.id,True);audit=checkpoint.parent/"computer-agent-audit.jsonl"
+            audit.write_text(audit.read_text(encoding="utf-8").replace("task_started","task_broken"),encoding="utf-8")
+            with self.assertRaisesRegex(ToolRejected,"审计日志"):
+                agent.execute(ticket,approval_ticket=ticket)
+            self.assertFalse((root/"approved.txt").exists())
 
 
 if __name__=="__main__":unittest.main()
