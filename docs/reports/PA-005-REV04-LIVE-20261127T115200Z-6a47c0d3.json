@@ -81,8 +81,13 @@
     },
     "gpu_memory_target_9500_to_10500_MiB": {
       "passed": false,
-      "observed_idle_or_peak_samples_MiB": [10588, 10716],
-      "result": "exceeds upper limit by 88 to 216 MiB"
+      "observed_samples_MiB": [10588, 10674, 10716],
+      "latest_idle_sample": {
+        "memory_used_MiB": 10674,
+        "memory_free_MiB": 1442,
+        "gpu_utilization_percent": 9
+      },
+      "result": "latest idle sample exceeds upper limit by 174 MiB"
     }
   },
   "source_validation": {
