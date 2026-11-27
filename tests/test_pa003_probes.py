@@ -90,9 +90,9 @@ class PA003ProbeTests(unittest.TestCase):
 
     def test_sse_captures_finish_usage_and_first_content_time(self):
         lines = [
-            b'data: {"choices":[{"delta":{"content":"hello"},"finish_reason":null}]}\\n',
-            b'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"completion_tokens":1}}\\n',
-            b'data: [DONE]\\n',
+            b'data: {"choices":[{"delta":{"content":"hello"},"finish_reason":null}]}\n',
+            b'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"completion_tokens":1}}\n',
+            b'data: [DONE]\n',
         ]
         result = probes.consume_sse(FakeResponse(lines), probes.time.perf_counter(), 10)
         self.assertEqual(result["content"], "hello")
@@ -102,7 +102,7 @@ class PA003ProbeTests(unittest.TestCase):
 
     def test_sse_timeout_preserves_partial_output(self):
         lines = [
-            b'data: {"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}\\n',
+            b'data: {"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}\n',
             socket.timeout("read timed out"),
         ]
         with self.assertRaises(probes.ProbeTimeout) as caught:
