@@ -1,0 +1,12 @@
+{
+  "run_id": "20261127T122331Z-1cd75200d9",
+  "test": "visual-scheduler",
+  "passed": true,
+  "database": "isolated application Store",
+  "task_paused": true,
+  "task_resumed": true,
+  "task_stopped": true,
+  "model_slot_idle": true,
+  "service_healthy": true,
+  "model": "Inkling-2-Mini-Uncensored-AD-IQ2_M.gguf"
+}
