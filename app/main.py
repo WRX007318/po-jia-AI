@@ -310,10 +310,12 @@ class Workbench(tk.Tk):
         self.chat_status.set("检查本地模型服务…")
         def run():
             content=""
+            loaded=False
             status="interrupted"
             try:
                 draft=self.store.draft(sid)
                 content=draft["content"]
+                loaded=True
                 messages=[dict(m) for m in self.store.messages(sid)]
                 if content:
                     messages += [{"role":"assistant","content":content},
@@ -351,8 +353,10 @@ class Workbench(tk.Tk):
             finally:
                 if status!="complete":
                     if cancel.is_set():status="cancelled"
-                    try:self.store.save_draft(sid,content,status)
-                    except Exception:status="checkpoint_error"
+                    if loaded:
+                        try:self.store.save_draft(sid,content,status)
+                        except Exception:status="checkpoint_error"
+                    else:status="checkpoint_error"
                 self.chat_events.put((sid,"finished",status))
         self.background(run)
 
