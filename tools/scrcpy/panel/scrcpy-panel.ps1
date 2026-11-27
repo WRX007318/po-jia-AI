@@ -16,8 +16,8 @@ if (-not (Test-Path -LiteralPath $script:adb) -or -not (Test-Path -LiteralPath $
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'scrcpy 安卓投屏面板'
 $form.StartPosition = 'CenterScreen'
-$form.ClientSize = New-Object System.Drawing.Size(560, 390)
-$form.MinimumSize = New-Object System.Drawing.Size(576, 429)
+$form.ClientSize = New-Object System.Drawing.Size(600, 480)
+$form.MinimumSize = New-Object System.Drawing.Size(616, 519)
 $form.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9)
 
 $title = New-Object System.Windows.Forms.Label
@@ -54,16 +54,95 @@ $refresh.Location = New-Object System.Drawing.Point(442, 98)
 $refresh.Size = New-Object System.Drawing.Size(88, 32)
 $form.Controls.Add($refresh)
 
+$sizeGroup = New-Object System.Windows.Forms.GroupBox
+$sizeGroup.Text = '窗口尺寸与画质'
+$sizeGroup.Location = New-Object System.Drawing.Point(24, 140)
+$sizeGroup.Size = New-Object System.Drawing.Size(552, 124)
+$form.Controls.Add($sizeGroup)
+
+$sizeLabel = New-Object System.Windows.Forms.Label
+$sizeLabel.Text = '窗口大小'
+$sizeLabel.Location = New-Object System.Drawing.Point(14, 29)
+$sizeLabel.Size = New-Object System.Drawing.Size(72, 24)
+$sizeGroup.Controls.Add($sizeLabel)
+
+$sizeMode = New-Object System.Windows.Forms.ComboBox
+$sizeMode.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+[void]$sizeMode.Items.AddRange(@('适配屏幕', '小窗 420×900', '标准 540×1160', '大窗 720×1540', '自定义'))
+$sizeMode.SelectedIndex = 0
+$sizeMode.Location = New-Object System.Drawing.Point(88, 25)
+$sizeMode.Size = New-Object System.Drawing.Size(166, 28)
+$sizeGroup.Controls.Add($sizeMode)
+
+$widthLabel = New-Object System.Windows.Forms.Label
+$widthLabel.Text = '宽'
+$widthLabel.Location = New-Object System.Drawing.Point(267, 29)
+$widthLabel.Size = New-Object System.Drawing.Size(24, 22)
+$sizeGroup.Controls.Add($widthLabel)
+
+$widthValue = New-Object System.Windows.Forms.NumericUpDown
+$widthValue.Minimum = 240
+$widthValue.Maximum = 2400
+$widthValue.Increment = 40
+$widthValue.Value = 540
+$widthValue.Location = New-Object System.Drawing.Point(292, 25)
+$widthValue.Size = New-Object System.Drawing.Size(76, 28)
+$widthValue.Enabled = $false
+$sizeGroup.Controls.Add($widthValue)
+
+$heightLabel = New-Object System.Windows.Forms.Label
+$heightLabel.Text = '高'
+$heightLabel.Location = New-Object System.Drawing.Point(380, 29)
+$heightLabel.Size = New-Object System.Drawing.Size(24, 22)
+$sizeGroup.Controls.Add($heightLabel)
+
+$heightValue = New-Object System.Windows.Forms.NumericUpDown
+$heightValue.Minimum = 320
+$heightValue.Maximum = 3000
+$heightValue.Increment = 40
+$heightValue.Value = 1160
+$heightValue.Location = New-Object System.Drawing.Point(405, 25)
+$heightValue.Size = New-Object System.Drawing.Size(82, 28)
+$heightValue.Enabled = $false
+$sizeGroup.Controls.Add($heightValue)
+
+$keepRatio = New-Object System.Windows.Forms.CheckBox
+$keepRatio.Text = '保持手机画面比例'
+$keepRatio.Checked = $true
+$keepRatio.Location = New-Object System.Drawing.Point(14, 61)
+$keepRatio.Size = New-Object System.Drawing.Size(175, 24)
+$sizeGroup.Controls.Add($keepRatio)
+
+$qualityLabel = New-Object System.Windows.Forms.Label
+$qualityLabel.Text = '清晰度上限'
+$qualityLabel.Location = New-Object System.Drawing.Point(206, 63)
+$qualityLabel.Size = New-Object System.Drawing.Size(82, 22)
+$sizeGroup.Controls.Add($qualityLabel)
+
+$qualityMode = New-Object System.Windows.Forms.ComboBox
+$qualityMode.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+[void]$qualityMode.Items.AddRange(@('原始分辨率', '1080p', '720p'))
+$qualityMode.SelectedIndex = 0
+$qualityMode.Location = New-Object System.Drawing.Point(292, 59)
+$qualityMode.Size = New-Object System.Drawing.Size(195, 28)
+$sizeGroup.Controls.Add($qualityMode)
+
 $fullscreen = New-Object System.Windows.Forms.CheckBox
-$fullscreen.Text = '全屏启动'
-$fullscreen.Checked = $true
-$fullscreen.Location = New-Object System.Drawing.Point(130, 143)
-$fullscreen.Size = New-Object System.Drawing.Size(120, 25)
-$form.Controls.Add($fullscreen)
+$fullscreen.Text = '全屏启动（忽略窗口大小）'
+$fullscreen.Checked = $false
+$fullscreen.Location = New-Object System.Drawing.Point(14, 91)
+$fullscreen.Size = New-Object System.Drawing.Size(240, 24)
+$sizeGroup.Controls.Add($fullscreen)
+
+$sizeMode.Add_SelectedIndexChanged({
+    $custom = ($sizeMode.SelectedIndex -eq 4)
+    $widthValue.Enabled = $custom
+    $heightValue.Enabled = $custom
+})
 
 $usbButton = New-Object System.Windows.Forms.Button
 $usbButton.Text = 'USB 投屏'
-$usbButton.Location = New-Object System.Drawing.Point(26, 184)
+$usbButton.Location = New-Object System.Drawing.Point(26, 278)
 $usbButton.Size = New-Object System.Drawing.Size(150, 44)
 $usbButton.BackColor = [System.Drawing.Color]::FromArgb(35, 112, 215)
 $usbButton.ForeColor = [System.Drawing.Color]::White
@@ -72,39 +151,39 @@ $form.Controls.Add($usbButton)
 
 $recordButton = New-Object System.Windows.Forms.Button
 $recordButton.Text = '开始录屏'
-$recordButton.Location = New-Object System.Drawing.Point(192, 184)
+$recordButton.Location = New-Object System.Drawing.Point(192, 278)
 $recordButton.Size = New-Object System.Drawing.Size(150, 44)
 $form.Controls.Add($recordButton)
 
 $shotButton = New-Object System.Windows.Forms.Button
 $shotButton.Text = '保存截图'
-$shotButton.Location = New-Object System.Drawing.Point(358, 184)
+$shotButton.Location = New-Object System.Drawing.Point(358, 278)
 $shotButton.Size = New-Object System.Drawing.Size(150, 44)
 $form.Controls.Add($shotButton)
 
 $wirelessLabel = New-Object System.Windows.Forms.Label
 $wirelessLabel.Text = '无线连接 IP'
-$wirelessLabel.Location = New-Object System.Drawing.Point(26, 257)
+$wirelessLabel.Location = New-Object System.Drawing.Point(26, 350)
 $wirelessLabel.Size = New-Object System.Drawing.Size(100, 25)
 $form.Controls.Add($wirelessLabel)
 
 $ipBox = New-Object System.Windows.Forms.TextBox
 $ipBox.Text = '192.168.1.100'
-$ipBox.Location = New-Object System.Drawing.Point(130, 253)
+$ipBox.Location = New-Object System.Drawing.Point(130, 346)
 $ipBox.Size = New-Object System.Drawing.Size(190, 28)
 $form.Controls.Add($ipBox)
 
 $wirelessButton = New-Object System.Windows.Forms.Button
 $wirelessButton.Text = '连接并投屏'
-$wirelessButton.Location = New-Object System.Drawing.Point(330, 250)
+$wirelessButton.Location = New-Object System.Drawing.Point(330, 343)
 $wirelessButton.Size = New-Object System.Drawing.Size(178, 34)
 $form.Controls.Add($wirelessButton)
 
 $hint = New-Object System.Windows.Forms.Label
 $hint.Text = '无线首次连接：先用 USB 连接手机并开启 USB 调试；点击无线连接后，按提示切换到手机的 IP 地址。'
 $hint.ForeColor = [System.Drawing.Color]::FromArgb(100, 108, 120)
-$hint.Location = New-Object System.Drawing.Point(27, 305)
-$hint.Size = New-Object System.Drawing.Size(500, 42)
+$hint.Location = New-Object System.Drawing.Point(27, 399)
+$hint.Size = New-Object System.Drawing.Size(530, 48)
 $form.Controls.Add($hint)
 
 function Get-SelectedSerial {
@@ -138,6 +217,27 @@ function Refresh-Devices {
 function Start-Mirror([string]$Serial, [switch]$Record) {
     if (-not $Serial) { [System.Windows.Forms.MessageBox]::Show('请先连接并选择一台设备。', 'scrcpy', 'OK', 'Information') | Out-Null; return }
     $scrcpyArgs = @('--serial', $Serial)
+    $workArea = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+    switch ($sizeMode.SelectedIndex) {
+        0 {
+            $targetHeight = [Math]::Min(1200, [int]($workArea.Height * 0.86))
+            $targetWidth = [int]($targetHeight * 0.48)
+            if ($targetWidth -gt [int]($workArea.Width * 0.82)) {
+                $targetWidth = [int]($workArea.Width * 0.82)
+                $targetHeight = [int]($targetWidth / 0.48)
+            }
+        }
+        1 { $targetWidth = 420; $targetHeight = 900 }
+        2 { $targetWidth = 540; $targetHeight = 1160 }
+        3 { $targetWidth = 720; $targetHeight = 1540 }
+        4 { $targetWidth = [int]$widthValue.Value; $targetHeight = [int]$heightValue.Value }
+    }
+    $scrcpyArgs += @('--window-width', [string]$targetWidth, '--window-height', [string]$targetHeight)
+    if (-not $keepRatio.Checked) { $scrcpyArgs += '--no-window-aspect-ratio-lock' }
+    switch ($qualityMode.SelectedIndex) {
+        1 { $scrcpyArgs += @('--max-size', '1920') }
+        2 { $scrcpyArgs += @('--max-size', '1280') }
+    }
     if ($fullscreen.Checked) { $scrcpyArgs += '--fullscreen' }
     if ($Record) {
         $videoDir = [Environment]::GetFolderPath('MyVideos')
