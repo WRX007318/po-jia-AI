@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import subprocess
 import sys
 import threading
@@ -10,7 +11,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
-from runtime import Runtime
+from runtime import Runtime, IncompleteGeneration
 from store import Store
 from bootstrap import check_model_dir, download as download_model, install_llama
 
@@ -34,9 +35,17 @@ class Workbench(tk.Tk):
         self.image = None
         self.worker_proc = None
         self.cancel = threading.Event()
+        self.chat_active = False
+        self.chat_events = queue.Queue()
         self._style()
         self._layout()
-        self.new_session()
+        sessions = self.store.sessions()
+        if sessions:
+            self.session = sessions[0]["id"]
+            self.render_messages()
+        else:
+            self.new_session()
+        self.after(100, self.poll_chat_events)
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.after(500, self.auto_start_runtime)
         self.after(1200, self.refresh)
@@ -83,6 +92,11 @@ class Workbench(tk.Tk):
         bar=ttk.Frame(f);bar.pack(fill="x",pady=(0,10))
         ttk.Button(bar,text="新建对话",command=self.new_session).pack(side="left")
         ttk.Button(bar,text="上传图片",command=self.chat_image).pack(side="left",padx=8)
+        ttk.Button(bar,text="历史对话",command=self.chat_history).pack(side="left")
+        ttk.Button(bar,text="继续未完成回答",command=self.resume_chat).pack(side="left",padx=8)
+        ttk.Button(bar,text="结束未完成回答",command=self.end_draft).pack(side="left")
+        self.chat_status=tk.StringVar(value="就绪")
+        ttk.Label(f,textvariable=self.chat_status,wraplength=850).pack(anchor="w")
         self.chat_log=tk.Text(f,wrap="word",bg="white",bd=0,padx=18,pady=16,font=("Microsoft YaHei UI",10),state="disabled")
         self.chat_log.pack(fill="both",expand=True)
         bottom=ttk.Frame(f);bottom.pack(fill="x",pady=(12,0))
@@ -204,47 +218,168 @@ class Workbench(tk.Tk):
         self.after(2500,self.refresh)
 
     def new_session(self):
-        self.session=self.store.new_session();self.render_messages()
+        if self.chat_active:
+            return messagebox.showwarning(APP,"请先停止当前生成。")
+        self.session=self.store.new_session()
+        self.image=None
+        self.render_messages()
+
+    def chat_history(self):
+        if self.chat_active:
+            return messagebox.showwarning(APP,"请先停止当前生成。")
+        rows=self.store.sessions()
+        win=tk.Toplevel(self);win.title("历史对话");win.geometry("640x360")
+        listing=tk.Listbox(win);listing.pack(fill="both",expand=True,padx=12,pady=12)
+        for row in rows:
+            listing.insert("end",time.strftime("%Y-%m-%d %H:%M:%S",time.localtime(row["updated"]))+" | "+row["title"]+" | "+row["id"][:8])
+        def select():
+            selection=listing.curselection()
+            if not selection or self.chat_active:return
+            self.session=rows[selection[0]]["id"]
+            self.image=None
+            self.render_messages();win.destroy()
+        ttk.Button(win,text="打开所选对话",command=select).pack(pady=8)
+        listing.bind("<Double-Button-1>",lambda event:select())
 
     def render_messages(self):
         if not hasattr(self,"chat_log"):return
         self.chat_log.configure(state="normal");self.chat_log.delete("1.0","end")
-        for m in self.store.messages(self.session):self.chat_log.insert("end",("你" if m["role"]=="user" else "破甲 AI")+"\n"+m["content"]+"\n\n")
+        for m in self.store.messages(self.session):
+            self.chat_log.insert("end",("你" if m["role"]=="user" else "破甲 AI")+"\n"+m["content"]+"\n\n")
+        draft=self.store.draft(self.session)
+        if draft:
+            self.chat_log.insert("end","破甲 AI（未完成）\n"+draft["content"])
+            if not self.chat_active:
+                self.chat_status.set("存在未完成回答："+draft["status"]+"；可继续或结束。")
+        elif not self.chat_active:
+            self.chat_status.set("就绪")
         self.chat_log.configure(state="disabled");self.chat_log.see("end")
 
     def chat_image(self):
+        if self.chat_active:return
         p=filedialog.askopenfilename(filetypes=[("图片","*.png *.jpg *.jpeg *.webp *.bmp")])
         if p:self.image=Path(p);messagebox.showinfo(APP,f"已附加：{self.image.name}")
 
     def send(self):
+        if self.chat_active:return
+        if self.store.draft(self.session):
+            return messagebox.showwarning(APP,"先继续或结束当前未完成回答。")
         prompt=self.prompt.get("1.0","end").strip()
         if not prompt:return
-        if self.runtime.status()!="ready":messagebox.showwarning(APP,"请先在模型管理中启动已安装的本地推理服务。");return
-        self.prompt.delete("1.0","end");self.store.add_message(self.session,"user",prompt);self.render_messages();self.cancel.clear()
-        self.chat_log.configure(state="normal");self.chat_log.insert("end","破甲 AI\n");self.chat_log.configure(state="disabled")
+        sid=self.session
+        image=self.image
+        # Image bytes are not persisted in the chat database. Mark the original
+        # prompt so continuation can explicitly require the image again.
+        if image:
+            prompt="[附加图片；继续时需重新选择原图]\n"+prompt
+        self.store.begin_draft(sid,prompt)
+        self.prompt.delete("1.0","end")
+        self.image=None
+        self.render_messages()
+        self.start_chat_draft(sid,image)
+
+    def resume_chat(self):
+        if self.chat_active:return
+        sid=self.session
+        draft=self.store.draft(sid)
+        if not draft:return messagebox.showinfo(APP,"没有未完成回答。")
+        history=self.store.messages(sid)
+        image=self.image
+        if history and history[-1]["content"].startswith("[附加图片；继续时需重新选择原图]"):
+            if not image:return messagebox.showwarning(APP,"请先重新选择原图。")
+            # Replaying an image while preserving a partial assistant message
+            # needs explicit multimodal message support, not silent substitution.
+            if draft["content"]:
+                return messagebox.showwarning(APP,"暂不支持图片回答的跨请求续写；可结束并重新发送图片。")
+        else:
+            image=None
+        self.image=None
+        self.start_chat_draft(sid,image)
+
+    def end_draft(self):
+        if self.chat_active:return
+        if not self.store.draft(self.session):return
+        if messagebox.askyesno(APP,"保留已收到的内容并标记为未完成，结束本次生成？"):
+            self.store.discard_draft(self.session);self.render_messages()
+
+    def start_chat_draft(self,sid,image):
+        if self.chat_active:return
+        self.chat_active=True
+        cancel=threading.Event()
+        self.cancel=cancel
+        self.chat_status.set("检查本地模型服务…")
         def run():
+            content=""
+            status="interrupted"
             try:
-                result=[]
-                for piece in self.runtime.chat(self.store.messages(self.session),self.image,stream=True,max_tokens=512):
-                    if self.cancel.is_set():break
-                    result.append(piece)
-                    self.after(0,lambda p=piece:self._append_chat_piece(p))
-                result="".join(result)
-                self.store.add_message(self.session,"assistant",result)
-                self.after(0,lambda:self.chat_log.insert("end","\n\n"))
-            except Exception as e:self.after(0,lambda:messagebox.showerror(APP,str(e)))
-            self.image=None
+                draft=self.store.draft(sid)
+                content=draft["content"]
+                messages=[dict(m) for m in self.store.messages(sid)]
+                if content:
+                    messages += [{"role":"assistant","content":content},
+                                 {"role":"user","content":"从上一段未完成回答的断点接着写，只输出后续内容，保留原任务约束，不重复已经写过的段落。"}]
+                if cancel.is_set():
+                    status="cancelled"
+                    return
+                if self.runtime.status()!="ready":
+                    status="model_not_ready"
+                    return
+                self.store.save_draft(sid,content,"generating")
+                self.chat_events.put((sid,"status","生成中…"))
+                # Preserve all original history for now: context budgeting and
+                # automatic summarization are separate PA-004 work items.
+                stream=self.runtime.chat(messages,image,stream=True,max_tokens=512,timeout=120)
+                try:
+                    for piece in stream:
+                        if cancel.is_set():break
+                        content+=piece
+                        self.store.save_draft(sid,content,"generating")
+                        self.chat_events.put((sid,"piece",piece))
+                finally:
+                    stream.close()
+                if cancel.is_set():
+                    status="cancelled"
+                else:
+                    self.store.finish_draft(sid,content)
+                    status="complete"
+            except IncompleteGeneration as exc:
+                status=exc.reason
+            except TimeoutError:
+                status="timeout"
+            except Exception as exc:
+                status="error: "+type(exc).__name__
+            finally:
+                if status!="complete":
+                    if cancel.is_set():status="cancelled"
+                    try:self.store.save_draft(sid,content,status)
+                    except Exception:status="checkpoint_error"
+                self.chat_events.put((sid,"finished",status))
         self.background(run)
+
+    def poll_chat_events(self):
+        try:
+            while True:
+                sid,kind,value=self.chat_events.get_nowait()
+                if kind=="finished":
+                    self.chat_active=False
+                    if self.session==sid:
+                        self.render_messages()
+                        self.chat_status.set("回答完成" if value=="complete" else "回答未完成："+value+"；已尝试保存进度。")
+                elif self.session==sid:
+                    if kind=="piece":self._append_chat_piece(value)
+                    elif kind=="status":self.chat_status.set(value)
+        except queue.Empty:
+            pass
+        self.after(100,self.poll_chat_events)
 
     def _append_chat_piece(self,piece):
         self.chat_log.configure(state="normal");self.chat_log.insert("end",piece);self.chat_log.see("end");self.chat_log.configure(state="disabled")
 
     def stop_generation(self):
+        if not self.chat_active:return
+        # Never cancel a global slot: the independent visual worker may own it.
         self.cancel.set()
-        try:
-            req=__import__("urllib.request",fromlist=["Request"]).Request(self.runtime.base+"/slots/0?action=cancel",method="POST")
-            __import__("urllib.request",fromlist=["urlopen"]).urlopen(req,timeout=2).close()
-        except Exception:pass
+        self.chat_status.set("已请求停止；等待当前流返回或超时，保留已收到的回答。")
 
     def pick_image(self):
         p=filedialog.askopenfilename(filetypes=[("图片","*.png *.jpg *.jpeg *.webp *.bmp")])
@@ -406,6 +541,7 @@ class Workbench(tk.Tk):
     def close(self):
         # Model service and scheduler are independent local processes; closing
         # this window must not stop work they already own.
+        self.cancel.set()
         self.destroy()
 
 
