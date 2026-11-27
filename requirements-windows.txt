@@ -1,0 +1,2 @@
+# UI Automation backend used by the bounded local computer agent.
+pywinauto==0.6.9

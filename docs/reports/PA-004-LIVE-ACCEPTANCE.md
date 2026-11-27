@@ -10,7 +10,7 @@ Date: 2026-11-27. Branch: `feat/pa-004-chat-continuity`. All raw conversations a
 
 ## Automated regression
 
-`python -m unittest discover -s tests -v`: 26 tests passed. Includes stream completion/truncation, durable draft recovery, bounded context preservation, duplicate-boundary detection, confirmed-memory correction history, versioned behavior settings/rollback, model integrity, and worker persistence tests. `compileall` passed for app and tests.
+`python -m unittest discover -s tests -v`: 30 tests passed. Includes stream completion/truncation, durable draft recovery, bounded context preservation, duplicate-boundary detection, confirmed-memory correction history, versioned behavior settings/rollback, computer-tool path/approval/step-limit checks, model integrity, and worker persistence tests. `compileall` passed for app and tests.
 
 ## Live 20-turn conversation
 
@@ -26,13 +26,20 @@ Date: 2026-11-27. Branch: `feat/pa-004-chat-continuity`. All raw conversations a
 
 Important limit: closing the HTTP client stream did not establish that llama-server immediately stopped decoding. The exact b12774 README documents `/v1/chat/completions/control` only for ending a reasoning block, and `/slots/{id}` save/restore/erase actions; it documents no general chat cancellation action. An upstream llama.cpp issue also records generation continuing after HTTP client disconnect. The UI Stop control therefore means “stop receiving/saving further stream content and preserve the draft”; backend cancellation latency and service-restart recovery remain unverified. The interruption harness exercises a SQLite close/reopen, not a full Windows app restart. Sources: [b12774 server API docs](https://github.com/ggml-org/llama.cpp/blob/171527522/tools/server/README.md#post-v1chatcompletionscontrol-control-a-running-chat-completion-in-real-time), [upstream disconnect cancellation issue](https://github.com/ggml-org/llama.cpp/issues/24496).
 
+## Computer-operation Agent live checks
+
+- Installed the pinned `pywinauto==0.6.9` UIA dependency for the workbench's Python 3.15 user environment; the project pin is in `requirements-windows.txt`.
+- `tests/run_computer_agent_model_plan_smoke.py` called the live IQ3_S CUDA model with a JSON schema. The latest run returned the requested read-only `list_windows` plan in 20.258 seconds; schema validation succeeded and the bounded executor returned zero allowlisted windows.
+- `tests/run_computer_agent_uia_smoke.py` launched a fresh Notepad window through the agent's one-time approval path, inspected the actual UIA tree, wrote and read back 30 characters through the Edit control, saved the exact text under an isolated temporary workspace, compared the file byte-for-character, then closed the exact test window and removed the temporary directory. Overwriting an existing workspace file creates a local backup before atomic replacement. **Passed** for this limited live UIA and workspace flow.
+- The executor accepts one bounded step at a time, permits only app paths explicitly chosen for the current task, constrains file access to the user-selected workspace, validates unique UIA controls, and requires a one-use user ticket for writes, launch, clicks and text changes. It has no shell, network, account, transaction, security-challenge, or process-kill tool.
+
 ## Desktop verification and remaining scope
 
-The desktop shortcut `C:\Users\Administrator\Desktop\破甲 AI.lnk` exists, and a Python 3.15 process with the window title `破甲 AI` was present. The window was minimized and the Computer Use helper reported it could not capture a minimized window; this run did **not** claim visual GUI acceptance or a fresh shortcut launch. Automatic startup after a cold boot, visual-model recognition on this PR #2 app session, and live testing of the new automatic-continuation/memory UI remain unverified.
+The desktop shortcut `C:\Users\Administrator\Desktop\破甲 AI.lnk` exists, and a Python 3.15 process with the window title `破甲 AI` was present. The window was minimized and the Computer Use helper reported it could not capture a minimized window; this run did **not** claim visual GUI acceptance or a fresh shortcut launch. Automatic startup after a cold boot, visual-model recognition on this PR #2 app session, and live testing of the new automatic-continuation/memory/behavior settings UI remain unverified.
 
 Opt-in text-only auto-continuation is bounded to at most four additional 512-token requests and stops on non-length errors, user stop, or long exact overlap. It is off by default; image continuations are not automatically repeated. Long-term memory is explicit user-entered local data, bounded and query-matched, and corrections preserve the inactive prior version. The settings page now includes a versioned role/context editor with schema validation, atomic apply, invalid-file preservation, and rollback. These features have unit coverage, not a live GUI acceptance yet.
 
-The behavior-control editor and safe Windows computer-operation Agent from `docs/PA-004-EXECUTION.md` are not complete. No external account action, security challenge handling, or unbounded shell access is implemented.
+The single-step computer agent is an initial bounded implementation, not the full PA-004 workbench: task pause/continue/restart checkpoints, screenshot capture, richer before/after diagnostics, an explicitly approved test-command runner, multi-step model planning, and full permission/revocation editor remain incomplete. No external account action, security challenge handling, or unbounded shell access is implemented.
 
 ## Reproduction
 
@@ -43,6 +50,8 @@ python -m unittest discover -s tests -v
 python tests/run_pa004_live_acceptance.py <isolated-data-directory>
 python tests/run_pa004_longform_acceptance.py <isolated-data-directory>
 python tests/run_pa004_interrupt_recovery.py <isolated-data-directory>
+python tests/run_computer_agent_model_plan_smoke.py
+python tests/run_computer_agent_uia_smoke.py
 ```
 
 Raw local result JSON, screenshots, conversation text, and SQLite files are intentionally excluded from the public repository.
