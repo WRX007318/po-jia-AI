@@ -4,6 +4,7 @@
 
 - A single cross-process file lease serializes chat, visual analysis, and the independent visual worker against the shared llama.cpp slot.
 - The deployed b12774 build returns HTTP 501 for `POST /slots/0?action=cancel`; cancellable chat therefore uses the streaming endpoint and closes its owned HTTP response. The lease is released only after `/slots` reports idle. On delayed cancellation, a background waiter retains the lease rather than allowing overlapping GPU work.
+- The same owned-stream cancellation and slot-idle wait applies to vision requests and Agent planning. The visual scheduler persists pause/resume/stop state around active-request cancellation; it never posts to the unsupported slot-cancel route.
 - The desktop checks the selected model identity and context against `/props`. A foreign, externally owned service is reported as a mismatch and is never stopped or adopted automatically.
 - Behavior settings support version comparison and rollback to a selected prior snapshot. Computer Agent events are recorded in a local append-only hash chain; an invalid chain fails closed before further logged actions.
 - Tool permissions live in a separate local allowlist enforced by `ComputerAgent.plan`; new installations default to read-only actions, while every mutating action continues to require a fresh plan-bound user approval.

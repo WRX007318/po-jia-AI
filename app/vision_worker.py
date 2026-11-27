@@ -105,22 +105,22 @@ class Worker:
     def analyze_interruptible(self,path):
         while not self.stop.is_set():
             while self.pause.is_set() and not self.stop.is_set():
+                self.store.update_task(self._active_task,status="paused",checkpoint=self._active_checkpoint)
                 self.stop.wait(.25);self.serve_once()
+            if not self.stop.is_set():self.store.update_task(self._active_task,status="running",checkpoint=self._active_checkpoint)
             lease=InferenceLease(self.store.root/"inference.lock")
             if not lease.acquire(cancel_event=self.stop,pause_event=self.pause,timeout=.25):
                 self.serve_once()
                 continue
+            cancel_request=threading.Event()
             pool=concurrent.futures.ThreadPoolExecutor(max_workers=1)
             try:
-                future=pool.submit(analyze,path,120,None,True)
+                future=pool.submit(analyze,path,120,None,True,cancel_request)
                 retry=False;cancel_sent=False
                 while not future.done():
                     self.stop.wait(.15);self.serve_once()
                     if (self.stop.is_set() or self.pause.is_set()) and not cancel_sent:
-                        try:
-                            req=urllib.request.Request("http://127.0.0.1:59871/slots/0?action=cancel",method="POST")
-                            urllib.request.urlopen(req,timeout=2).close()
-                        except Exception:pass
+                        cancel_request.set()
                         cancel_sent=True
                     if cancel_sent and future.done():break
                     if self.stop.is_set() or self.pause.is_set():
