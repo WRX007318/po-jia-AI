@@ -10,3 +10,6 @@
 __pycache__/
 *.log
 hardware/local/
+.pa006-build-env/
+build/pyinstaller/
+dist/PoJiaAI/

@@ -1,5 +1,11 @@
 # PA-003 实施决策日志
 
+## 2026-11-27 — PA-006 Windows executable packaging
+
+- A reproducible Windows onedir build uses isolated Python 3.11, pinned PyInstaller 6.22.3, the desktop `PoJiaAI.exe`, and a separately bundled `PoJiaAI-Worker/PoJiaAI-Worker.exe`. Frozen desktop code launches the sibling Worker EXE rather than recursively invoking itself as Python.
+- The desktop EXE archive was inspected for `app.main`, `runtime`, `computer_agent`, `pywinauto`, and `comtypes`; the Worker EXE `--help` smoke exits 0. PowerShell build and shortcut installer scripts parse without errors.
+- Model weights, mmproj, and llama.cpp runtime remain external under `D:\PoJiaAI`. Both EXEs were built and hashed locally, then excluded from Git. Opening the packaged desktop UI and end-to-end desktop acceptance remain pending until the user hands back the active window.
+
 ## 2026-11-27 — PA-006 bounded computer-agent sequences
 
 - The desktop Agent now asks the local model for a sequence of at most eight typed operation requests, constrained by the task's remaining step budget. The entire request list is schema/permission checked and frozen before preview; concrete paths, windows, and current state are revalidated just in time before each step so a later edit/read can legitimately depend on an earlier successful write.

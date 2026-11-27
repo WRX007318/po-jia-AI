@@ -1,0 +1,54 @@
+{
+  "run_id": "20261127T151102Z-6b7b410dab",
+  "scope": "PA-006 Windows onedir package build and artifact checks",
+  "created_utc": "2026-11-27T15:11:02Z",
+  "automated_regression": {
+    "unittest_discover": "passed",
+    "tests_run": 65,
+    "compileall_app_tests": "passed",
+    "diff_check": "passed"
+  },
+  "build": {
+    "status": "passed",
+    "python": "3.11.9",
+    "pyinstaller": "6.22.3",
+    "desktop_executable": {
+      "path": "dist/PoJiaAI/PoJiaAI.exe",
+      "size_bytes": 3730340,
+      "sha256": "41CF5419CDC1B4FA90AE31EE0C48579B4B788BF39CD2C655D0C07954A0ED6E58"
+    },
+    "visual_worker_executable": {
+      "path": "dist/PoJiaAI/PoJiaAI-Worker/PoJiaAI-Worker.exe",
+      "size_bytes": 2018318,
+      "sha256": "FDF4D8065804C90A5D6BDB90A0DFE1CF3DEE2F11A0DE78EE8C3EF8F85CF423D1"
+    },
+    "excluded_from_git": "dist/PoJiaAI and local build environment are gitignored"
+  },
+  "artifact_checks": {
+    "desktop_archive_contains": ["app.main", "runtime", "computer_agent", "pywinauto", "comtypes"],
+    "worker_help_exit_code": 0,
+    "build_script_powershell_parse": "passed",
+    "shortcut_installer_powershell_parse": "passed",
+    "model_weights_mmproj_llama_runtime_in_package": false
+  },
+  "live_acceptance": {
+    "packaged_desktop_gui_launched": false,
+    "reason": "User's active desktop session remains in use; no second GUI instance was launched.",
+    "worker_real_task_run_from_packaged_exe": false,
+    "shortcut_target_updated": false,
+    "status": "package built, live desktop acceptance pending"
+  },
+  "hardware_observation": {
+    "driver": "621.40",
+    "gpu": "RTX 3060 12GB",
+    "nvidia_smi_memory_used_mib": 10672,
+    "nvidia_smi_memory_total_mib": 12288,
+    "gpu_utilization_percent": 4,
+    "memory_gate": "failed: exceeds 10500 MiB",
+    "cuda_vulkan_matrix": "not run"
+  },
+  "limitations": [
+    "Successful packaging and a Worker CLI help check do not prove the packaged desktop application or Worker can perform a live task.",
+    "No main GUI was opened; model performance, desktop interactions, data recovery, and shortcut launch remain unverified."
+  ]
+}

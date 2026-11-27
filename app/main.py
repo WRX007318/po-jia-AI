@@ -945,8 +945,14 @@ class Workbench(tk.Tk):
 
     def ensure_worker(self):
         if self.worker_proc and self.worker_proc.poll() is None:return
-        command=[sys.executable,str(REPO/"app"/"vision_worker.py"),"--data-dir",str(DATA)]
-        self.worker_proc=subprocess.Popen(command,cwd=REPO/"app",creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0),stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        if getattr(sys,"frozen",False):
+            worker_exe=Path(sys.executable).resolve().parent/"PoJiaAI-Worker"/"PoJiaAI-Worker.exe"
+            if not worker_exe.is_file():
+                raise FileNotFoundError(f"独立视觉 Worker 未打包：{worker_exe}")
+            command=[str(worker_exe),"--data-dir",str(DATA)];cwd=worker_exe.parent
+        else:
+            command=[sys.executable,str(REPO/"app"/"vision_worker.py"),"--data-dir",str(DATA)];cwd=REPO/"app"
+        self.worker_proc=subprocess.Popen(command,cwd=cwd,creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0),stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 
     def create_task(self):
         folder=filedialog.askdirectory(title="选择已授权的本地截图目录")
