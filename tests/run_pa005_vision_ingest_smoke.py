@@ -29,7 +29,9 @@ try:
         raise SystemExit(f"worker task did not complete the unique sample exactly once: {task['status']} / {task['processed']}")
     if len(rows)!=1 or not rows[0]["category"] or not rows[0]["ocr"]:
         raise SystemExit("visual annotation was not committed to the temporary database")
-    compare_standard_ocr(rows[0]["ocr"]+" "+rows[0]["category"]+" "+rows[0]["labels"])
+    standard_text=rows[0]["ocr"]+" "+rows[0]["category"]+" "+rows[0]["labels"]
+    record["standard_ocr_hits"]={item:item in standard_text for item in __import__("pa005_acceptance").EXPECTED_OCR}
+    compare_standard_ocr(standard_text)
     store.update_sample(rows[0]["id"],"人工纠正类别",["人工复核"],True)
     reviewed=store.sample(rows[0]["id"])
     if reviewed["category"]!="人工纠正类别" or not reviewed["reviewed"]:
@@ -41,6 +43,9 @@ try:
     with urllib.request.urlopen(__import__("pa005_acceptance").endpoint()+"/health",timeout=3) as r:healthy=r.status==200
     if not healthy:raise SystemExit("inference service became unhealthy")
     record.update({"passed":True,"task_completed":True,"unique_samples":len(rows),"processed_count":task["processed"],"ocr_characters":len(reviewed["ocr"]),"human_correction_persisted":True,"restart_recovery":True,"elapsed_seconds":round(elapsed,3),"model":expected_model})
+except BaseException as exc:
+    record.update({"error_type":type(exc).__name__,"error":str(exc)[:500]})
+    raise
 finally:
  write_report(report,record)
 print(json.dumps({**record,"report":str(report)},ensure_ascii=False))

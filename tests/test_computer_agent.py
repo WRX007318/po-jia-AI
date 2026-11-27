@@ -1,4 +1,5 @@
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 import sys
@@ -128,6 +129,38 @@ class ComputerAgentTests(unittest.TestCase):
             with self.assertRaisesRegex(ToolRejected,"审计日志"):
                 agent.execute(ticket,approval_ticket=ticket)
             self.assertFalse((root/"approved.txt").exists())
+
+    def test_approval_ticket_is_consumed_once_under_concurrent_execute(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td);agent=ComputerAgent(root);agent.begin_task()
+            plan=agent.plan("write_text",{"path":"once.txt","content":"once"})
+            ticket=agent.approve(plan.id,True);barrier=threading.Barrier(3);results=[]
+            def run():
+                barrier.wait()
+                try:results.append(("ok",agent.execute(ticket,approval_ticket=ticket)))
+                except ToolRejected as exc:results.append(("rejected",str(exc)))
+            threads=[threading.Thread(target=run) for _ in range(2)]
+            for thread in threads:thread.start()
+            barrier.wait()
+            for thread in threads:thread.join(5)
+            self.assertTrue(all(not thread.is_alive() for thread in threads))
+            self.assertEqual([item[0] for item in results].count("ok"),1)
+            self.assertEqual((root/"once.txt").read_text(encoding="utf-8"),"once")
+
+    def test_emergency_stop_is_terminal_and_recovery_stays_paused(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td);checkpoint=root/"state"/"agent.json"
+            agent=ComputerAgent(root,checkpoint_path=checkpoint);agent.begin_task()
+            plan=agent.plan("write_text",{"path":"blocked.txt","content":"no"})
+            ticket=agent.approve(plan.id,True)
+            self.assertTrue(agent.stop());self.assertEqual(agent.state,"stopped")
+            self.assertFalse(agent.resume())
+            with self.assertRaisesRegex(ToolRejected,"stopped"):
+                agent.execute(ticket,approval_ticket=ticket)
+            self.assertFalse((root/"blocked.txt").exists())
+            restored=ComputerAgent(root,checkpoint_path=checkpoint)
+            with self.assertRaisesRegex(ToolRejected,"状态不可恢复"):
+                restored.restore_checkpoint()
 
 
 if __name__=="__main__":unittest.main()

@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "run_id": "20261127T115200Z-6a47c0d3",
+  "phase": "PA-005-REV04 live retest",
+  "branch": "feat/pa-004-chat-continuity",
+  "model": "D:/PoJiaAI/models/inkling2mini/Inkling-2-Mini-Uncensored-AD-IQ2_M.gguf",
+  "runtime": "llama.cpp b12774 CUDA; NVIDIA Studio driver 621.40; RTX 3060 12GB",
+  "profile": {
+    "gpu_layers": 99,
+    "cpu_moe": 0,
+    "context_tokens": 4096,
+    "threads": 4,
+    "batch_threads": 4,
+    "kv_cache": "q8_0",
+    "flash_attention": true
+  },
+  "live_gates": {
+    "chinese_short_answer": {
+      "passed": true,
+      "first_visible_token_seconds": 2.047,
+      "generation_tokens_per_second": 43.754,
+      "visible_tokens": 85,
+      "finish_reason": "stop"
+    },
+    "structured_json": {
+      "passed": true,
+      "seconds": 3.63,
+      "schema_valid": true,
+      "finish_reason": "stop"
+    },
+    "synthetic_image_recognition": {
+      "passed": true,
+      "seconds": 6.46,
+      "expected_visible_records": 2,
+      "needs_human_review": false,
+      "schema_valid": true
+    },
+    "vision_ingest": {
+      "passed": true,
+      "run_id": "20261127T113312Z-d1f60468d3",
+      "seconds": 7.522,
+      "unique_samples": 1,
+      "duplicate_processed": false,
+      "standard_ocr_items": 6,
+      "manual_correction_persisted": true,
+      "database_reopen_recovery": true
+    },
+    "visual_scheduler": {
+      "passed": true,
+      "run_id": "20261127T114703Z-83731540bc",
+      "paused": true,
+      "resumed": true,
+      "stopped": true,
+      "inference_slot_idle_after_stop": true,
+      "service_healthy_after_stop": true
+    },
+    "twenty_turn_chat": {
+      "passed": true,
+      "run_id": "20261127T113454Z-0d16baec61",
+      "completed_turns": 20,
+      "persisted_history_messages": 40,
+      "draft_remaining": false
+    },
+    "long_form_2000_chinese_characters": {
+      "passed": true,
+      "run_id": "20261127T114411Z-f029f38db3",
+      "chinese_characters": 2170,
+      "elapsed_seconds": 81.826,
+      "completed_sections": 5,
+      "all_segments_finished_normally": true,
+      "history_messages": 2
+    },
+    "interrupt_resume": {
+      "passed": true,
+      "run_id": "20261127T114721Z-e90fb95ff6",
+      "partial_characters_before_cancel": 240,
+      "checkpoint_after_database_reopen": true,
+      "incomplete_resume_attempts_rejected": 2,
+      "completed_resume_attempt": true,
+      "exactly_one_history_commit": true
+    },
+    "gpu_memory_target_9500_to_10500_MiB": {
+      "passed": false,
+      "observed_idle_or_peak_samples_MiB": [10588, 10716],
+      "result": "exceeds upper limit by 88 to 216 MiB"
+    }
+  },
+  "source_validation": {
+    "unittest_discover": "50 passed",
+    "compileall": "passed",
+    "git_diff_check": "passed",
+    "coverage_notes": [
+      "positive and negative JSON schema and model-path gates",
+      "approval ticket concurrency consumed exactly once",
+      "emergency stop terminal state and rejected restore",
+      "audit tampering rejected before file side effect",
+      "vision timeout stays error and retains current sample checkpoint",
+      "OCR standard comparison, duplicate-line merge, and strict 20 second gate"
+    ]
+  },
+  "overall_passed": false,
+  "blocked_gates": [
+    "GPU memory exceeds the required 9500–10500 MiB band.",
+    "The 20-turn and long-form cases were exercised against the desktop-launched local service through the app runtime API, not through actual chat-window button interaction.",
+    "Full GUI acceptance of behavior controls, long-term memory, configuration rollback, and computer-agent UI actions remains unverified."
+  ],
+  "data_handling": "synthetic business screenshot and isolated temporary Store only; no credentials, private conversations, or local database included"
+}

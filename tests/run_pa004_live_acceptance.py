@@ -1,6 +1,7 @@
 """Live model + PA-004 runtime/store acceptance on an isolated SQLite database."""
 from __future__ import annotations
-import json, pathlib, sys, time
+import json, pathlib, sys, time, uuid
+from datetime import datetime, timezone
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"app"))
 from runtime import Runtime, build_context
@@ -8,8 +9,11 @@ from store import Store
 
 HOME=pathlib.Path(r"D:\PoJiaAI")
 DATA=pathlib.Path(sys.argv[1]) if len(sys.argv)>1 else ROOT/".pa003-cache"/"pa004-live-data"
+DATA.mkdir(parents=True,exist_ok=True)
 store=Store(DATA); runtime=Runtime(HOME,HOME/"models"/"inkling2mini")
 if runtime.status()!="ready": raise SystemExit("CUDA-backed local model not ready at expected model path")
+with __import__("urllib.request",fromlist=["urlopen"]).urlopen(runtime.base+"/props",timeout=3) as response:server_props=json.load(response)
+run_id=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")+"-"+uuid.uuid4().hex[:10]
 sid=store.new_session("PA-004 live 20-turn acceptance")
 turns=[
 ("固定事实：测试暗号是青松731。请回复已记住。","已记住"),
@@ -51,9 +55,12 @@ for i,(prompt,expected) in enumerate(turns,1):
         store=Store(DATA)
         assert store.draft(sid) is not None
         assert store.messages(sid)[-1]["content"] == prompt
-    records.append({"turn":i,"seconds":round(elapsed,3),"answer_chars":len(answer),"expected_marker":expected,"marker_present":(expected in answer if expected else None),"error":error,"answer":answer})
-    print(json.dumps(records[-1],ensure_ascii=False),flush=True)
+    records.append({"turn":i,"seconds":round(elapsed,3),"answer_chars":len(answer),"expected_marker":expected,"marker_present":(expected in answer if expected else None),"error":error})
+    print(json.dumps({k:v for k,v in records[-1].items() if k!="error"},ensure_ascii=False),flush=True)
     if error: break
 history_rows=store.messages(sid)
-result={"run":"live-model","model":"IQ3_S","backend":"CUDA b12774","session_id":sid,"turns_requested":20,"turns_completed":len([r for r in records if not r['error']]),"history_messages":len(history_rows),"draft_after_run":bool(store.draft(sid)),"history_matches_completed":len(history_rows)==sum(1 for r in records if not r['error'])*2,"turn_results":records}
-out=DATA/"pa004-live-20-turns.json";out.write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding="utf-8");print("REPORT="+str(out));
+completed=sum(1 for r in records if not r['error'])
+marker_failures=[r["turn"] for r in records if r["expected_marker"] and not r["marker_present"]]
+result={"run_id":run_id,"model":pathlib.Path(server_props.get("model_path","")).name,"model_path":server_props.get("model_path"),"backend":"CUDA b12774","turns_requested":20,"turns_completed":completed,"history_messages":len(history_rows),"draft_after_run":bool(store.draft(sid)),"history_matches_completed":len(history_rows)==completed*2,"marker_failures":marker_failures,"passed":completed==20 and not marker_failures and len(history_rows)==40 and not store.draft(sid),"turn_results":records}
+out=DATA/f"pa004-live-20-turns-{run_id}.json";out.write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding="utf-8");print("REPORT="+str(out));
+if not result["passed"]:raise SystemExit(2)

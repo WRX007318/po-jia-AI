@@ -20,8 +20,9 @@ BASE=service_base()
 
 
 class Worker:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, analysis_timeout: float = 20):
         self.store = Store(root)
+        self.analysis_timeout=max(.1,float(analysis_timeout))
         self.stop = threading.Event()
         self.pause = threading.Event()
         self.control = root / "worker.json"
@@ -76,6 +77,9 @@ class Worker:
                 newly_processed=added
                 row=self.store.sample(digest[:24])
                 if row and not row["category"]:
+                    # The current image is the recoverable boundary until model
+                    # annotation commits; persist it before an interrupt or timeout.
+                    self._active_checkpoint=str(p)
                     annotation=self.analyze_interruptible(p)
                     if annotation is None:
                         if self.stop.is_set():
@@ -125,11 +129,10 @@ class Worker:
                 retry=False;cancel_sent=False;started=time.monotonic()
                 while not future.done():
                     self.stop.wait(.15);self.serve_once()
-                    if time.monotonic()-started>20 and not cancel_sent:
+                    if time.monotonic()-started>self.analysis_timeout and not cancel_sent:
                         cancel_request.set();cancel_sent=True
-                        self.store.update_task(self._active_task,status="error",error="视觉处理超过 20 秒验收门槛；检查点保留",checkpoint=self._active_checkpoint)
                         retry=False
-                        raise TimeoutError("视觉处理超过 20 秒验收门槛")
+                        raise TimeoutError(f"视觉处理超过 {self.analysis_timeout:g} 秒验收门槛；检查点保留")
                     if (self.stop.is_set() or self.pause.is_set()) and not cancel_sent:
                         cancel_request.set()
                         cancel_sent=True
@@ -139,6 +142,10 @@ class Worker:
                 if self.stop.is_set():return None
                 if retry:continue
                 return future.result()
+            except TimeoutError:
+                # Preserve the explicit timeout state from run_task; never relabel
+                # a hard acceptance timeout as a transient model outage.
+                raise
             except Exception as e:
                 self.store.update_task(self._active_task,status="waiting_model",error=f"视觉识别暂不可用，稍后从同一检查点重试：{e}",checkpoint=self._active_checkpoint)
                 return None

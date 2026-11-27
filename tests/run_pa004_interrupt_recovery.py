@@ -1,6 +1,7 @@
 """Exercise a live streamed response, deliberate client interruption and recovery."""
 from __future__ import annotations
 import json, pathlib, sys, threading, time
+from pa005_acceptance import new_run,require_model,write_report
 
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"app"))
@@ -11,6 +12,11 @@ HOME=pathlib.Path(r"D:\PoJiaAI")
 DATA=pathlib.Path(sys.argv[1]) if len(sys.argv)>1 else ROOT/".pa003-cache"/"pa004-interrupt-data"
 runtime=Runtime(HOME,HOME/"models"/"inkling2mini")
 if runtime.status()!="ready":raise SystemExit("expected verified local model service not ready")
+expected_model=require_model()
+with __import__("urllib.request",fromlist=["urlopen"]).urlopen(runtime.base+"/props",timeout=3) as response:
+    props=json.load(response)
+if pathlib.Path(props.get("model_path","")).resolve()!=runtime.model_path.resolve():raise SystemExit("actual loaded model path does not match selected IQ2_M model")
+run_id,report=new_run("interrupt-recovery")
 store=Store(DATA);sid=store.new_session("PA-004 live interrupt recovery")
 prompt="请用中文分节写一篇关于本地备份策略的长文，至少1200字。先开始回答。"
 store.begin_draft(sid,prompt);received=[];started=time.perf_counter();error=None
@@ -62,14 +68,15 @@ if continuation and resume_error is None:
 else:
     store.save_draft(sid,partial+continuation,resume_error or "empty_continuation")
 store=Store(DATA);rows=store.messages(sid);draft=store.draft(sid)
-result={"session_id":sid,"initial_seconds":round(interrupt_seconds,3),
+result={"run_id":run_id,"model":expected_model,"session_id":sid,"initial_seconds":round(interrupt_seconds,3),
         "partial_chars":len(partial),"restart_checkpoint_matches":bool(checkpoint and checkpoint["content"]==partial),
         "continuation_seconds":round(time.perf_counter()-resume_start,3),"continuation_chars":len(continuation),
         "continuation_events":resume_events,
         "initial_error":error,"continuation_error":resume_error,"complete_history_messages":len(rows),
         "draft_status":draft["status"] if draft else None,"finished_exactly_once":draft is None and len(rows)==2,
         "answer_prefix_preserved":bool(rows and rows[-1]["content"].startswith(partial))}
-out=DATA/"pa004-interrupt-recovery.json";out.write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding="utf-8")
+out=report
+write_report(out,result)
 print(json.dumps(result,ensure_ascii=False,indent=2));print("REPORT="+str(out))
 if not result["restart_checkpoint_matches"] or not result["finished_exactly_once"] or not result["answer_prefix_preserved"]:
     raise SystemExit(2)

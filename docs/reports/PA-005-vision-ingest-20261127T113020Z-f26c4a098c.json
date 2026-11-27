@@ -1,0 +1,6 @@
+{
+  "run_id": "20261127T113020Z-f26c4a098c",
+  "test": "vision-ingest",
+  "passed": false,
+  "database": "isolated temporary application Store"
+}

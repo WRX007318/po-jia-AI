@@ -59,6 +59,11 @@ class PA003ProbeTests(unittest.TestCase):
             "event_count": 3,
         }
         self.assertTrue(probes.evaluate_probe("chinese_short_answer", response)["gate_passed"])
+        response["content"] = "破甲 AI 的推理性能测试已通过。"
+        self.assertTrue(probes.evaluate_probe("chinese_short_answer", response)["gate_passed"])
+        response["content"] = "破甲 AI 已启动。"
+        self.assertFalse(probes.evaluate_probe("chinese_short_answer", response)["gate_passed"])
+        response["content"] = "破甲 AI 推理性能测试通过"
         response["finish_reason"] = "length"
         self.assertFalse(probes.evaluate_probe("chinese_short_answer", response)["gate_passed"])
 

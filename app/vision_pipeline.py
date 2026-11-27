@@ -38,7 +38,7 @@ def analyze(path:Path,timeout=360,lease_path:Path|None=None,lease_held=False,can
     local_ocr=tesseract_ocr(path)
     if cancel_event and cancel_event.is_set():raise InterruptedError("视觉推理已取消")
     prompt=("对这张由用户授权提供的业务页面截图做 OCR 与页面元素标注。只返回符合 JSON Schema 的结果。"
-            "识别页面类别、最多3条最重要的可见文字、最多1个主要页面元素、最多2个分类标签；每项用几个字简短表达。"
+            "识别页面类别、最多4条重要可见文字（优先页面标题、列表/表格标题、订单号及状态）、最多1个主要页面元素、最多2个分类标签；每项用几个字简短表达。"
             "如果包含验证码、安全验证、人机校验、登录挑战或访问限制，needs_human_review=true；不要识别、转录或描述挑战内容。"
             "不要输出或推测账号、密钥等未显示内容。")
     if local_ocr:prompt+=f"\n本地 OCR 引擎提取文字如下，可用于核对但需以图片为准：\n{local_ocr[:12000]}"
@@ -96,7 +96,7 @@ def analyze(path:Path,timeout=360,lease_path:Path|None=None,lease_held=False,can
     if time.monotonic()-started >= 20:raise TimeoutError("视觉处理超过 20 秒验收门槛")
     result=json.loads(raw)
     _validate_schema(result)
-    ocr=local_ocr or "\n".join(result["visible_text"])
+    ocr=merge_ocr_text(local_ocr,result["visible_text"])
     try:
         with urllib.request.urlopen(BASE+"/props",timeout=2) as r:loaded=Path(json.load(r).get("model_path","" )).name
     except Exception:loaded="unknown local model"
@@ -116,3 +116,14 @@ def _validate_schema(value):
         if not isinstance(item,dict) or set(item)!={"type","text","label"} or any(not isinstance(item[k],str) for k in item):fail(f"$.elements[{i}]","strict element object")
     if not isinstance(value["labels"],list) or len(value["labels"])>3 or any(not isinstance(x,str) for x in value["labels"]):fail("$.labels","array<string> maxItems=3")
     if not isinstance(value["needs_human_review"],bool):fail("$.needs_human_review","boolean")
+
+
+def merge_ocr_text(local_ocr,visible_text):
+    """Retain local OCR and model-detected text; partial OCR must not mask model text."""
+    values=[];seen=set()
+    for text in [local_ocr,*visible_text]:
+        for line in str(text).splitlines():
+            line=line.strip()
+            if line and line not in seen:
+                seen.add(line);values.append(line)
+    return "\n".join(values)

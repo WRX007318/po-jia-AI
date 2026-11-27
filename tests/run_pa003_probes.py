@@ -281,7 +281,9 @@ def evaluate_probe(
 
     if name == "chinese_short_answer":
         speed = row["generation_tokens_per_second"]
-        row["content_correct"] = "破甲 AI 推理性能测试通过" in content
+        # Accept natural Chinese variants such as “破甲 AI 的推理性能测试已通过”,
+        # while requiring all task-specific concepts and a concise answer.
+        row["content_correct"] = all(marker in content for marker in ("破甲 AI", "性能测试", "通过")) and len(content) <= 120
         row["gate_passed"] = bool(row["complete"] and row["content_correct"] and isinstance(speed, (int, float)) and speed >= 8)
     elif name in ("structured_json", "synthetic_vision"):
         try:
@@ -413,7 +415,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.probe in ("all", "text"):
         report["tests"].append(run_one(
             "chinese_short_answer",
-            [{"role": "user", "content": "请直接用中文回答：破甲 AI 推理性能测试通过。"}],
+            [{"role": "user", "content": "请用中文简短确认破甲 AI 推理性能测试已通过，控制在30个汉字以内。"}],
             base_url=base_url, timeout=args.text_timeout, max_tokens=args.text_max_tokens,
         ))
     if args.probe == "reasoning":

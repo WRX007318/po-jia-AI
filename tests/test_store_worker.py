@@ -74,7 +74,24 @@ class StoreWorkerTests(unittest.TestCase):
                 worker.run_task(s.task(tid))
             task=s.task(tid)
             self.assertEqual(task["status"],"waiting_model")
-            self.assertFalse(task["checkpoint"])
+            self.assertTrue(task["checkpoint"].endswith("a.png"))
+            self.assertEqual(task["processed"],0)
+
+    def test_hard_visual_timeout_remains_error_with_retry_checkpoint(self):
+        import time
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td);source=root/"src";source.mkdir();(source/"a.png").write_bytes(FIXTURE.read_bytes())
+            s=Store(root/"db");tid=s.create_task(str(source),10);worker=Worker(root/"db",analysis_timeout=.1)
+            health=MagicMock();health.__enter__.return_value=health;health.__exit__.return_value=False
+            def slow(*_args,**_kwargs):
+                time.sleep(.35)
+                return {"page_type":"synthetic","ocr":"text","labels":[],"needs_human_review":False}
+            with patch("vision_worker.urllib.request.urlopen",return_value=health),patch("vision_worker.analyze",side_effect=slow):
+                worker.run_task(s.task(tid))
+            task=s.task(tid)
+            self.assertEqual(task["status"],"error")
+            self.assertIn("超过 0.1 秒",task["error"])
+            self.assertTrue(task["checkpoint"].endswith("a.png"))
             self.assertEqual(task["processed"],0)
 
     def test_resume_counts_imported_but_unannotated_unique_sample(self):

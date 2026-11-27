@@ -1,0 +1,8 @@
+{
+  "run_id": "20261127T113228Z-5c4a26d673",
+  "test": "vision-ingest",
+  "passed": false,
+  "database": "isolated temporary application Store",
+  "error_type": "AssertionError",
+  "error": "标准 OCR 对照缺失：PJ-2026-001, PJ-2026-002, 已完成, 处理中"
+}

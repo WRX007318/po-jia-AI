@@ -1,0 +1,12 @@
+{
+  "run_id": "20261127T113325Z-2483a8a509",
+  "test": "vision",
+  "passed": true,
+  "fixture": "synthetic_business.png",
+  "model": "Inkling-2-Mini-Uncensored-AD-IQ2_M.gguf",
+  "elapsed_seconds": 6.834,
+  "recognized_page_type": "业务订单管理",
+  "structured_elements": 1,
+  "human_review": false,
+  "gpu": "10588 MiB, 1528 MiB, 96 %"
+}
