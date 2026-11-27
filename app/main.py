@@ -11,7 +11,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
-from runtime import Runtime, IncompleteGeneration, build_context
+from runtime import Runtime, IncompleteGeneration, build_context, continuation_overlap
 from store import Store
 from bootstrap import check_model_dir, download as download_model, install_llama
 
@@ -103,6 +103,12 @@ class Workbench(tk.Tk):
         ttk.Spinbox(budget,from_=1000,to=48000,increment=1000,width=8,textvariable=self.context_budget,command=self.update_context_estimate).pack(side="left",padx=6)
         self.context_usage=tk.StringVar(value="估算：0 字符（约 0 tokens）")
         ttk.Label(budget,textvariable=self.context_usage,style="Sub.TLabel").pack(side="left",padx=8)
+        self.auto_continue=tk.BooleanVar(value=False)
+        ttk.Checkbutton(budget,text="长度截断后自动续写（仅文字）",variable=self.auto_continue,
+                        command=self.update_context_estimate).pack(side="left",padx=(12,4))
+        self.auto_continue_limit=tk.IntVar(value=2)
+        ttk.Spinbox(budget,from_=1,to=4,width=3,textvariable=self.auto_continue_limit).pack(side="left")
+        ttk.Label(budget,text="次上限",style="Sub.TLabel").pack(side="left",padx=4)
         self.chat_log=tk.Text(f,wrap="word",bg="white",bd=0,padx=18,pady=16,font=("Microsoft YaHei UI",10),state="disabled")
         self.chat_log.pack(fill="both",expand=True)
         bottom=ttk.Frame(f);bottom.pack(fill="x",pady=(12,0))
@@ -193,8 +199,44 @@ class Workbench(tk.Tk):
         ttk.Label(f,text=f"数据目录：{DATA}").pack(anchor="w",pady=4)
         ttk.Label(f,text=f"运行时目录：{ROOT}").pack(anchor="w",pady=4)
         ttk.Button(f,text="打开数据目录",command=lambda:os.startfile(DATA)).pack(anchor="w",pady=8)
+        ttk.Label(f,text="长期记忆（仅保存你明确添加的内容；校正会保留旧版本）").pack(anchor="w",pady=(8,3))
+        self.memory_list=tk.Listbox(f,height=5,exportselection=False)
+        self.memory_list.pack(fill="x")
+        memories=ttk.Frame(f);memories.pack(fill="x",pady=4)
+        ttk.Button(memories,text="添加记忆",command=self.add_memory).pack(side="left")
+        ttk.Button(memories,text="校正选中项",command=self.correct_memory).pack(side="left",padx=6)
+        ttk.Button(memories,text="停用选中项",command=self.deactivate_memory).pack(side="left")
+        self.refresh_memories()
         ttk.Label(f,text="安全边界：仅本地推理；不自动操作大麦账号、交易或安全验证页面。",wraplength=780).pack(anchor="w",pady=12)
         self.log=tk.Text(f,bg="white",bd=0);self.log.pack(fill="both",expand=True)
+
+    def refresh_memories(self):
+        if not hasattr(self,"memory_list"):return
+        rows=self.store.memories();self._memory_ids=[row["id"] for row in rows]
+        self.memory_list.delete(0,"end")
+        for row in rows:self.memory_list.insert("end",f"#{row['id']}  {row['content']}")
+
+    def add_memory(self):
+        value=simpledialog.askstring(APP,"输入需要长期记住的内容（最多 1000 字）：",parent=self)
+        if value is None:return
+        try:self.store.add_memory(value);self.refresh_memories()
+        except ValueError as exc:messagebox.showerror(APP,str(exc))
+
+    def correct_memory(self):
+        selected=self.memory_list.curselection()
+        if not selected:return messagebox.showinfo(APP,"请先选择一条记忆。")
+        old_id=self._memory_ids[selected[0]]
+        old=next((x for x in self.store.memories() if x["id"]==old_id),None)
+        if not old:return self.refresh_memories()
+        value=simpledialog.askstring(APP,"修正记忆；旧版本会保留并停用：",initialvalue=old["content"],parent=self)
+        if value is None:return
+        try:self.store.add_memory(value,supersedes=old_id);self.refresh_memories()
+        except ValueError as exc:messagebox.showerror(APP,str(exc))
+
+    def deactivate_memory(self):
+        selected=self.memory_list.curselection()
+        if not selected:return messagebox.showinfo(APP,"请先选择一条记忆。")
+        self.store.deactivate_memory(self._memory_ids[selected[0]]);self.refresh_memories()
 
     def show(self,key):
         for p in self.pages.values():p.pack_forget()
@@ -327,6 +369,9 @@ class Workbench(tk.Tk):
     def start_chat_draft(self,sid,image):
         if self.chat_active:return
         self.chat_active=True
+        auto_continue=bool(self.auto_continue.get() and image is None)
+        try:continuation_limit=max(1,min(4,int(self.auto_continue_limit.get())))
+        except (ValueError,tk.TclError):continuation_limit=2
         cancel=threading.Event()
         self.cancel=cancel
         self.chat_status.set("检查本地模型服务…")
@@ -338,10 +383,6 @@ class Workbench(tk.Tk):
                 draft=self.store.draft(sid)
                 content=draft["content"]
                 loaded=True
-                messages=[dict(m) for m in self.store.messages(sid)]
-                if content:
-                    messages += [{"role":"assistant","content":content},
-                                 {"role":"user","content":"从上一段未完成回答的断点接着写，只输出后续内容，保留原任务约束，不重复已经写过的段落。"}]
                 if cancel.is_set():
                     status="cancelled"
                     return
@@ -349,22 +390,51 @@ class Workbench(tk.Tk):
                     status="model_not_ready"
                     return
                 self.store.save_draft(sid,content,"generating")
-                self.chat_events.put((sid,"status","生成中…"))
-                messages=build_context(messages,max(1000,min(48000,int(self.context_budget.get()))))
-                stream=self.runtime.chat(messages,image,stream=True,max_tokens=512,timeout=120)
-                try:
-                    for piece in stream:
-                        if cancel.is_set():break
-                        content+=piece
-                        self.store.save_draft(sid,content,"generating")
-                        self.chat_events.put((sid,"piece",piece))
-                finally:
-                    stream.close()
-                if cancel.is_set():
-                    status="cancelled"
-                else:
-                    self.store.finish_draft(sid,content)
-                    status="complete"
+                continuation_count=0
+                while True:
+                    messages=[dict(m) for m in self.store.messages(sid)]
+                    if content:
+                        messages += [{"role":"assistant","content":content},
+                                     {"role":"user","content":"从上一段未完成回答的断点接着写，只输出后续内容，保留原任务约束，不重复已经写过的段落。"}]
+                    query=next((m["content"] for m in reversed(messages) if m["role"]=="user"),"")
+                    memories=self.store.relevant_memories(query)
+                    if memories:
+                        messages.insert(0,{"role":"system","content":"以下是用户确认的长期记忆，仅在与当前请求相关时使用；如与当前明确指令冲突，以当前指令为准：\n- " + "\n- ".join(memories)})
+                    budget=max(1000,min(48000,int(self.context_budget.get())))
+                    messages=build_context(messages,budget)
+                    label=(f"续写中（{continuation_count}/{continuation_limit}）…"
+                           if continuation_count else "生成中…")
+                    self.chat_events.put((sid,"status",label))
+                    stream=self.runtime.chat(messages,image,stream=True,max_tokens=512,timeout=120)
+                    reason=None;previous_content=content;segment_content=""
+                    check_overlap=bool(previous_content) or continuation_count>0
+                    try:
+                        for piece in stream:
+                            if cancel.is_set():break
+                            segment_content+=piece
+                            content+=piece
+                            self.store.save_draft(sid,content,"generating")
+                            self.chat_events.put((sid,"piece",piece))
+                    except IncompleteGeneration as exc:
+                        reason=exc.reason
+                    finally:
+                        stream.close()
+                    if cancel.is_set():
+                        status="cancelled"
+                        break
+                    if check_overlap and continuation_overlap(previous_content,segment_content):
+                        status="repeated_output"
+                        break
+                    if reason is None:
+                        self.store.finish_draft(sid,content)
+                        status="complete"
+                        break
+                    if reason=="length" and auto_continue and continuation_count<continuation_limit:
+                        continuation_count+=1
+                        status="length"
+                        continue
+                    status=reason
+                    break
             except IncompleteGeneration as exc:
                 status=exc.reason
             except TimeoutError:

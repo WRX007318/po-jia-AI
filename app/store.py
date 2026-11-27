@@ -27,6 +27,7 @@ class Store:
               CREATE TABLE IF NOT EXISTS chat_drafts(session_id TEXT PRIMARY KEY,content TEXT NOT NULL,status TEXT NOT NULL,updated REAL NOT NULL,FOREIGN KEY(session_id) REFERENCES sessions(id));
               CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY,source TEXT NOT NULL,status TEXT NOT NULL,limit_count INTEGER NOT NULL,processed INTEGER NOT NULL DEFAULT 0,checkpoint TEXT,error TEXT,updated REAL NOT NULL);
               CREATE TABLE IF NOT EXISTS samples(id TEXT PRIMARY KEY,path TEXT NOT NULL,sha256 TEXT UNIQUE NOT NULL,width INTEGER,height INTEGER,source TEXT NOT NULL,category TEXT NOT NULL DEFAULT '',ocr TEXT NOT NULL DEFAULT '',labels TEXT NOT NULL DEFAULT '[]',reviewed INTEGER NOT NULL DEFAULT 0,created REAL NOT NULL);
+              CREATE TABLE IF NOT EXISTS memories(id INTEGER PRIMARY KEY,content TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1,source TEXT NOT NULL DEFAULT 'user',supersedes INTEGER,created REAL NOT NULL,updated REAL NOT NULL,FOREIGN KEY(supersedes) REFERENCES memories(id));
             """)
 
     @contextmanager
@@ -107,6 +108,44 @@ class Store:
                       (sid,"assistant",row["content"] + "\n\n[用户结束未完成的生成]",now))
             c.execute("DELETE FROM chat_drafts WHERE session_id=?", (sid,))
             c.execute("UPDATE sessions SET updated=? WHERE id=?", (now,sid))
+
+    def memories(self, active_only=True):
+        sql="SELECT * FROM memories"+(" WHERE active=1" if active_only else "")+" ORDER BY updated DESC,id DESC"
+        with self.connect() as c:return c.execute(sql).fetchall()
+
+    def add_memory(self, content, source="user", supersedes=None):
+        content=" ".join(str(content).split())
+        if not content or len(content)>1000:raise ValueError("记忆内容必须为 1–1000 个字符")
+        with self.connect() as c:
+            now=time.time()
+            if supersedes is not None:
+                changed=c.execute("UPDATE memories SET active=0,updated=? WHERE id=? AND active=1",(now,supersedes))
+                if changed.rowcount!=1:raise ValueError("待校正记忆不存在或已停用")
+            cur=c.execute("INSERT INTO memories(content,active,source,supersedes,created,updated) VALUES(?,1,?,?,?,?)",
+                          (content,source,supersedes,now,now))
+            return cur.lastrowid
+
+    def deactivate_memory(self, memory_id):
+        with self.connect() as c:
+            return c.execute("UPDATE memories SET active=0,updated=? WHERE id=? AND active=1",(time.time(),memory_id)).rowcount==1
+
+    def relevant_memories(self, query, max_items=8, max_chars=1500):
+        """Return bounded, query-overlapping confirmed memories without model-written mutations."""
+        query=str(query).casefold();ranked=[]
+        for row in self.memories():
+            content=row["content"];normalized=content.casefold()
+            ascii_terms=set(__import__("re").findall(r"[a-z0-9_]{3,}",query))
+            score=sum(1 for term in ascii_terms if term in normalized)
+            for i in range(max(0,len(query)-1)):
+                pair=query[i:i+2]
+                if any("\u4e00"<=ch<="\u9fff" for ch in pair) and pair in normalized:score+=1
+            if score:ranked.append((score,row["updated"],content))
+        ranked.sort(key=lambda x:(-x[0],-x[1]))
+        result=[];used=0
+        for _,_,content in ranked:
+            if len(result)>=max_items or used+len(content)>max_chars:continue
+            result.append(content);used+=len(content)
+        return result
 
     def create_task(self, source, limit_count):
         import uuid

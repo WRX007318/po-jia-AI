@@ -94,6 +94,15 @@ def build_context(messages, max_chars=12000):
     return systems + ordered
 
 
+def continuation_overlap(previous: str, segment: str, minimum: int = 32) -> int:
+    """Return a long exact boundary overlap; never silently rewrite user-visible text."""
+    limit = min(len(previous), len(segment))
+    for size in range(limit, minimum - 1, -1):
+        if previous[-size:] == segment[:size]:
+            return size
+    return 0
+
+
 class Runtime:
     def __init__(self, root: Path, models: Path):
         self.root, self.models = root, models

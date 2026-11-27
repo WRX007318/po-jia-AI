@@ -18,6 +18,18 @@ FIXTURE=Path(__file__).resolve().parent/"fixtures"/"synthetic_business.png"
 
 
 class StoreWorkerTests(unittest.TestCase):
+    def test_confirmed_memory_retrieval_and_correction_history(self):
+        with tempfile.TemporaryDirectory() as td:
+            store=Store(Path(td));old=store.add_memory("喜欢使用中文回复，并优先写 Python 工具。")
+            self.assertTrue(store.relevant_memories("请用中文写一个 Python 工具。"))
+            replacement=store.add_memory("中文优先；代码示例使用 Python。",supersedes=old)
+            active=store.memories();all_rows=store.memories(active_only=False)
+            self.assertEqual([row["id"] for row in active],[replacement])
+            self.assertEqual(len(all_rows),2)
+            self.assertEqual(all_rows[1]["active"],0)
+            self.assertTrue(store.deactivate_memory(replacement))
+            self.assertEqual(store.relevant_memories("Python 中文"),[])
+
     def test_session_persists_across_reopen(self):
         with tempfile.TemporaryDirectory() as td:
             s=Store(Path(td)); sid=s.new_session("测试")

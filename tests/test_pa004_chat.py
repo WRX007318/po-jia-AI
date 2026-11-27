@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"app"))
-from runtime import IncompleteGeneration, iter_answer, build_context
+from runtime import IncompleteGeneration, iter_answer, build_context, continuation_overlap
 from store import Store
 
 
@@ -15,6 +15,12 @@ def event(delta=None, finish=None):
 
 
 class StreamIntegrityTests(unittest.TestCase):
+    def test_continuation_duplicate_boundary_detection(self):
+        previous="开头。重复段落"*12
+        repeated=previous[-40:]+"接下来的新内容"
+        self.assertEqual(continuation_overlap(previous,repeated),40)
+        self.assertEqual(continuation_overlap(previous,"完全新写的段落。"),0)
+
     def test_complete(self):
         frames=[event({"reasoning_content":"hidden"}),event({"content":"答"}),event({"content":"案"}),
                 event(finish="stop"),b'data: {"choices":[],"usage":{"completion_tokens":2}}\n',b"data: [DONE]\n"]

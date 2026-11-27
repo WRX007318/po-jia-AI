@@ -22,6 +22,7 @@ try:
             stream.close();break
 except Exception as exc:error=f"{type(exc).__name__}: {exc}"
 partial="".join(received)
+interrupt_seconds=time.perf_counter()-started
 if not partial:raise SystemExit("model produced no visible partial text; interruption was not exercised")
 store.save_draft(sid,partial,"cancelled")
 store=Store(DATA) # close/reopen SQLite to exercise restart recovery
@@ -30,22 +31,45 @@ if checkpoint is None or checkpoint["content"]!=partial:raise SystemExit("checkp
 history=[dict(x) for x in store.messages(sid)]
 history.extend([{"role":"assistant","content":partial},
                 {"role":"user","content":"请从上次中断的末尾继续，只生成后续内容，不要重复已有文本。"}])
-continuation="";resume_start=time.perf_counter();resume_error=None
-try:
-    for piece in runtime.chat(history,stream=True,max_tokens=512,timeout=240):
-        continuation+=piece;store.save_draft(sid,partial+continuation,"generating")
-except Exception as exc:resume_error=f"{type(exc).__name__}: {exc}"
-if continuation and not resume_error:
+continuation="";resume_start=time.perf_counter();resume_error=None;resume_events=[]
+for attempt in range(3):
+    current=partial+continuation
+    if attempt==0:
+        resume_prompt="请从上次中断的末尾继续，只生成后续内容，不要重复已有文本。"
+        limit=512
+    else:
+        resume_prompt="请为上文补写一个简短结语，自然结束全文，不要重复已有内容。"
+        limit=256
+    resume_history=[dict(x) for x in store.messages(sid)]
+    resume_history.extend([{"role":"assistant","content":current},
+                           {"role":"user","content":resume_prompt}])
+    segment="";segment_error=None;segment_start=time.perf_counter()
+    try:
+        for piece in runtime.chat(resume_history,stream=True,max_tokens=limit,timeout=240):
+            segment+=piece;store.save_draft(sid,current+segment,"generating")
+    except Exception as exc:segment_error=f"{type(exc).__name__}: {exc}"
+    continuation+=segment
+    resume_events.append({"attempt":attempt+1,"seconds":round(time.perf_counter()-segment_start,3),
+                          "chars":len(segment),"error":segment_error})
+    if segment_error is None and segment.strip():
+        resume_error=None
+        break
+    resume_error=segment_error or "empty_continuation"
+    if segment_error and "length" not in segment_error.lower():
+        break
+if continuation and resume_error is None:
     store.finish_draft(sid,partial+continuation)
 else:
     store.save_draft(sid,partial+continuation,resume_error or "empty_continuation")
 store=Store(DATA);rows=store.messages(sid);draft=store.draft(sid)
-result={"session_id":sid,"initial_seconds":round(time.perf_counter()-started,3),
+result={"session_id":sid,"initial_seconds":round(interrupt_seconds,3),
         "partial_chars":len(partial),"restart_checkpoint_matches":bool(checkpoint and checkpoint["content"]==partial),
         "continuation_seconds":round(time.perf_counter()-resume_start,3),"continuation_chars":len(continuation),
+        "continuation_events":resume_events,
         "initial_error":error,"continuation_error":resume_error,"complete_history_messages":len(rows),
         "draft_status":draft["status"] if draft else None,"finished_exactly_once":draft is None and len(rows)==2,
         "answer_prefix_preserved":bool(rows and rows[-1]["content"].startswith(partial))}
 out=DATA/"pa004-interrupt-recovery.json";out.write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding="utf-8")
 print(json.dumps(result,ensure_ascii=False,indent=2));print("REPORT="+str(out))
-if not result["restart_checkpoint_matches"]:raise SystemExit(2)
+if not result["restart_checkpoint_matches"] or not result["finished_exactly_once"] or not result["answer_prefix_preserved"]:
+    raise SystemExit(2)
