@@ -62,3 +62,11 @@
 - **IQ2_M：**固定 HF revision `82b34b9b0e5bc2e3e7b6d617ec8cc3e0f9692ee2`，预期长度 8,665,091,680，权重 LFS SHA256 `fca99d488bff5d401c8bc6b0110c5377c743f0ffb3a6d19c1ae4a3b9071fa2cd`。使用 Range 续传到本机 `.part`；截至记录时约 2.17 GB，仍未完整、未计算最终 SHA、不得启动或称为已部署。
 - **决策：**仅在下载长度和 LFS SHA-256 均验证后独立启动 IQ2_M 基准；桌面 `app/bootstrap.py` 仅校验 IQ3_S，因此 IQ2_M 不可冒名接入桌面 ready 判定。矩阵脚本按配置串行启停服务并写本机日志；CUDA/Vulkan 继续隔离。
 - **回滚：**`D:\PoJiaAI\runtime-vulkan-b12774-backup` 保留原 53 文件 Vulkan 构建；生产 `runtime` 路径未修改。CUDA 与 IQ2_M 基准失败时停止自身进程并返回 Vulkan。
+
+## 2026-11-27 — IQ2_M CUDA matrix result
+
+- **完整性：**固定 HF revision 下载完成；大小 8,665,091,680 bytes，SHA256 与 Hub LFS OID `fca99d488bff5d401c8bc6b0110c5377c743f0ffb3a6d19c1ae4a3b9071fa2cd` 相符。CUDA llama.cpp b12774 `171527522` 实际加载同一文件并报告 vision=true。
+- **矩阵：**串行完成 IQ2_M 全 GPU MoE 与 `--n-cpu-moe 23` 两组，各测 context 2048/4096/8192 × threads 4/6，共12格；每个推理期间500ms采样RAM/VRAM/GPU利用率。脱敏汇总在 `docs/reports/PA-003-PERF-REPORT.md`，原始JSON/CSV及server日志仅本机保留。
+- **选择：**`-ngl 99 --n-cpu-moe 0 -c 4096 -t 4 -tb 4 -fa on -ctk q8_0 -ctv q8_0 --jinja -np 1`。严格提示复测：中文短答39.985 tok/s，结构化JSON3.588s，768px视觉5.854s，三项通过；VRAM峰值10,339 MiB，测试期间最低可用RAM13.28 GiB。全GPU 8192 context 峰值10,817–10,823 MiB，超过显存目标上限；CPU-MoE23 用显存6.61–7.52 GiB但速度6.35–8.14 tok/s且视觉6/6超时，淘汰。
+- **限制：**llama-server props 将该已校验 Hub IQ2_M 文件报告为 `IQ2_XXS - 2.0625 bpw`，保留命名差异说明。生产桌面仍固定IQ3_S校验路径，IQ2_M仅独立基准；当前IQ3_S 5.37 tok/s旧结果不是同参数对照。视觉取消接口仍HTTP501；reasoning变体、桌面CUDA运行及PA-004连续对话/长文/GUI恢复未验收。
+- **回滚：**所有IQ2测试服务只由矩阵脚本按PID启停；Vulkan运行时备份与生产路径未改，选中CUDA目录仍与生产目录隔离。

@@ -359,7 +359,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json-timeout", type=float, default=30)
     parser.add_argument("--text-timeout", type=float, default=180)
     parser.add_argument("--reasoning-timeout", type=float, default=90)
-    parser.add_argument("--text-max-tokens", type=int, default=256)
+    parser.add_argument("--text-max-tokens", type=int, default=128)
     parser.add_argument("--json-max-tokens", type=int, default=512)
     parser.add_argument("--vision-max-tokens", type=int, default=256)
     parser.add_argument("--backend", default="unspecified")
@@ -413,7 +413,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.probe in ("all", "text"):
         report["tests"].append(run_one(
             "chinese_short_answer",
-            [{"role": "user", "content": "请直接用中文回答：破甲 AI 推理性能测试通过。"}],
+            [{"role": "user", "content": "请严格只输出以下字符串，不要增删或解释：破甲 AI 推理性能测试通过"}],
             base_url=base_url, timeout=args.text_timeout, max_tokens=args.text_max_tokens,
         ))
     if args.probe == "reasoning":
