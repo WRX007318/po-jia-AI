@@ -46,3 +46,12 @@
 - **Reasoning 实测：**原桌面启动的 PA-002 Vulkan 服务仍为 PID 15928/父进程 `launch.pyw`，未停止。直接流式请求传入 `chat_template_kwargs.reasoning_effort=none`，64-token 上限在 25.76s 完成但结束原因 `length`；仅收到 reasoning_content、final content 为空，reasoning 约 2.61 tok/s，判失败/截断。不是最终答案，不计通过。
 - **资源/安全决策：**该用户窗口服务仍占 GPU 约8.4GiB、进程工作集约12GiB；不停止用户拥有的服务，也不并行装载测试模型。一个额外的由本轮启动的 b12774 Vulkan 加载实例曾停留在 health 503，随后仅停止该实例。Reasoning 对比、JSON/图像768px、CUDA 对比及完整阶段6–8矩阵仍未完成。
 - **回滚：**生产服务未替换，生产 runtime 未动；CUDA 文件不部署。保留 `D:\PoJiaAI\runtime-vulkan-b12774-backup` 与旧 INF 导出。选择性验证需由用户先关闭桌面“破甲 AI”窗口，或另安排低负载维护时段；不得擅杀其进程。
+
+## 2026-11-27 — CUDA live probes after user authorized service stop
+
+- **驱动/进程：**现场 `nvidia-smi` 显示 RTX 3060 12GB / 621.40。桌面父窗口已不存在，但其 orphan `D:\PoJiaAI\runtime\llama-server.exe` PID 15928 仍持有 59871；仅在确认 PID、模型 IQ3_S、exe 和 listener 后按本轮用户授权停止该服务。PA-002 Vulkan runtime 本身未修改。
+- **CUDA部署：**已复用本机下载的 b12774 `llama-b12774-bin-win-cuda-12.4-x64.zip` 和配套 cudart DLL，部署至独立 `D:\PoJiaAI\runtime-cuda12-b12774`。CUDA实例PID 24580/4988 在端口59872运行；未覆盖 Vulkan 安装。
+- **实测：**CUDA same-model same-text 探针真实答案正确，96生成 token，`finish_reason=stop`，21.703s总时长、首内容16.50s、5.37 tok/s，速度门槛失败。CUDA结构化 JSON 26.89s、严格schema有效，通过该项。1024长边视觉20.12s超时；768长边视觉20.24s超时，结果截断、非JSON；不可记通过。原始运行JSON仅本机 `D:\PoJiaAI\logs\pa003\probes-cuda*`。
+- **决策：**CUDA目前是IQ3_S更快的可运行候选，但5.37 tok/s仍低于8，尚非达标生产解；需同一测试输入多轮对照和IQ2_M。视觉超时取消接口返回501，health恢复且slot空闲；记录取消链路缺口。
+- **未完成：**IQ2_M固定revision/LFS SHA256下载与测试、Reasoning变体、重复/受控CUDA-Vulkan比较、完整性能矩阵均待执行。PA-003总体验收不通过。
+- **回滚：**CUDA实例仅监听59872且本轮已停止；生产路径和桌面runtime仍是原Vulkan b12774；需要回退时重启原桌面快捷方式即可。
