@@ -1,0 +1,176 @@
+{
+  "hardware": {
+    "cpu": "Intel Core i5-10400F, 6 cores / 12 threads",
+    "ram_gib": 32,
+    "gpu": "NVIDIA GeForce RTX 3060 12 GiB",
+    "driver": "512.15 (CUDA 11.6)",
+    "backend": "llama.cpp b12774 Windows Vulkan x64",
+    "model_integrity": {
+      "revision": "82b34b9b0e5bc2e3e7b6d617ec8cc3e0f9692ee2",
+      "gguf_sha256": "23a8e6792481b6f1d0ebad51399e9ee2a2c2be8525b09ed1ae6737811159f892",
+      "mmproj_sha256": "5a72e0b6e2bef13c3f455f4edb85df0c752b92ff76ab46af879eae088163efe6",
+      "source_field": "Hugging Face pinned tree lfs.oid (content SHA-256), not Xet hash/Resolve ETag",
+      "re_downloaded": false
+    }
+  },
+  "selected_profile": {
+    "gpu_layers": 12,
+    "context": 2048,
+    "threads": 6,
+    "reasoning_budget_tokens": 64,
+    "selection_reason": "Best observed generation throughput while retaining 2048 context and about 3.4 GiB system-wide free VRAM"
+  },
+  "profile_matrix": [
+    {
+      "gpu_layers": 12,
+      "context": 2048,
+      "threads": 6,
+      "prompt_eval_seconds": 4.3,
+      "prompt_eval_tokens_per_second": 4.89,
+      "generation_tokens_per_second": 2.6,
+      "reply_seconds": 32.83,
+      "server_working_set_gib": 10.23,
+      "available_ram_gib": 9.53,
+      "gpu_used_mib": 8633,
+      "gpu_free_mib": 3508
+    },
+    {
+      "gpu_layers": 8,
+      "context": 2048,
+      "threads": 4,
+      "prompt_eval_seconds": 4.8,
+      "generation_tokens_per_second": 2.39,
+      "reply_seconds": 35.85,
+      "server_working_set_gib": 10.25,
+      "available_ram_gib": 9.54,
+      "gpu_used_mib": 8615,
+      "gpu_free_mib": 3526
+    },
+    {
+      "gpu_layers": 12,
+      "context": 1024,
+      "threads": 6,
+      "prompt_eval_seconds": 4.4,
+      "generation_tokens_per_second": 2.57,
+      "reply_seconds": 33.24,
+      "server_working_set_gib": 10.15,
+      "available_ram_gib": 9.66,
+      "gpu_used_mib": 8475,
+      "gpu_free_mib": 3666
+    },
+    {
+      "gpu_layers": 12,
+      "context": 2048,
+      "threads": 4,
+      "prompt_eval_seconds": 5.14,
+      "generation_tokens_per_second": 2.31,
+      "reply_seconds": 37.68,
+      "server_working_set_gib": 10.23,
+      "available_ram_gib": 9.54,
+      "gpu_used_mib": 8633,
+      "gpu_free_mib": 3508
+    }
+  ],
+  "resource_snapshot_note": "System-wide GPU numbers and available RAM fluctuate with desktop/browser load; server working set includes cached model/KV state. Values are point-in-time measurements, not model-only VRAM attribution.",
+  "inference_probes": [
+    {
+      "name": "chinese_dialogue",
+      "status": "passed",
+      "seconds": 37.425,
+      "output": "已收到：破甲 AI 本地推理已连通。请直接输入你的问题或任务。"
+    },
+    {
+      "name": "code_generation",
+      "status": "passed",
+      "seconds": 40.768,
+      "output": "def even_squares(nums):\\n    return [x * x for x in nums if x % 2 == 0]"
+    },
+    {
+      "name": "structured_json",
+      "status": "passed",
+      "seconds": 77.116,
+      "json_parse": true,
+      "output": {
+        "page_type": "webpage",
+        "visible_text": [
+          "首页",
+          "搜索",
+          "登录",
+          "注册"
+        ],
+        "elements": [
+          {
+            "type": "header",
+            "text": "首页"
+          },
+          {
+            "type": "search_box",
+            "text": "搜索"
+          },
+          {
+            "type": "button",
+            "text": "登录"
+          },
+          {
+            "type": "button",
+            "text": "注册"
+          }
+        ],
+        "needs_human_review": true
+      },
+      "note": "Valid schema output; conservative but incorrect safety-review flag on generic synthetic prompt."
+    },
+    {
+      "name": "image_chat_initial_probe",
+      "status": "truncated_at_test_budget",
+      "seconds": 121.745,
+      "max_tokens": 256,
+      "note": "Kept as the failed probe evidence. Replaced by the actual visual-worker end-to-end acceptance below."
+    }
+  ],
+  "independent_visual_worker_e2e": {
+    "status": "passed",
+    "worker_as_separate_process": true,
+    "input": "synthetic_business.png (fictional generic business list; no real account/customer data)",
+    "task_status": "completed",
+    "processed_unique_images": 1,
+    "checkpoint_updated": true,
+    "model_prompt_eval_seconds": 11.805,
+    "model_prompt_eval_tokens": 657,
+    "generation_tokens": 182,
+    "generation_tokens_per_second": 2.32,
+    "analysis_elapsed_seconds": 89.71,
+    "sqlite_annotation": {
+      "category": "业务订单管理",
+      "ocr": "业务订单管理\\n订单列表\\n共 2 条记录",
+      "labels": [
+        "订单管理",
+        "业务列表"
+      ],
+      "reviewed": false
+    }
+  },
+  "automated_tests": {
+    "unittest_passed": 7,
+    "py_compile": "passed",
+    "diff_check": "passed"
+  },
+  "desktop_shortcut": {
+    "status": "passed",
+    "shortcut": "C:\\Users\\Administrator\\Desktop\\破甲 AI.lnk",
+    "window_title": "破甲 AI"
+  },
+  "remaining_acceptance": [
+    "No user-supplied authorized de-identified/WDA business screenshot was available, so real 大麦 page accuracy remains unmeasured.",
+    "Live GUI streaming and stop button need interactive acceptance.",
+    "Long-running pause/resume/stop after Codex exit needs soak testing.",
+    "The 16-layer and 4096-context profiles were not tested; no driver update was performed."
+  ],
+  "streaming_api": {
+    "status": "passed",
+    "first_content_seconds": 28.97,
+    "total_seconds": 31.76,
+    "chunks": 6,
+    "output": "流式输出正常。"
+  }
+}
