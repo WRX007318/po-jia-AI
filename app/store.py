@@ -26,9 +26,16 @@ class Store:
               CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY,session_id TEXT NOT NULL,role TEXT NOT NULL,content TEXT NOT NULL,created REAL NOT NULL,FOREIGN KEY(session_id) REFERENCES sessions(id));
               CREATE TABLE IF NOT EXISTS chat_drafts(session_id TEXT PRIMARY KEY,content TEXT NOT NULL,status TEXT NOT NULL,updated REAL NOT NULL,FOREIGN KEY(session_id) REFERENCES sessions(id));
               CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY,source TEXT NOT NULL,status TEXT NOT NULL,limit_count INTEGER NOT NULL,processed INTEGER NOT NULL DEFAULT 0,checkpoint TEXT,error TEXT,updated REAL NOT NULL);
+              CREATE TABLE IF NOT EXISTS task_samples(task_id TEXT NOT NULL,sample_id TEXT NOT NULL,image_path TEXT NOT NULL,created REAL NOT NULL,PRIMARY KEY(task_id,sample_id),FOREIGN KEY(task_id) REFERENCES tasks(id),FOREIGN KEY(sample_id) REFERENCES samples(id));
               CREATE TABLE IF NOT EXISTS samples(id TEXT PRIMARY KEY,path TEXT NOT NULL,sha256 TEXT UNIQUE NOT NULL,width INTEGER,height INTEGER,source TEXT NOT NULL,category TEXT NOT NULL DEFAULT '',ocr TEXT NOT NULL DEFAULT '',labels TEXT NOT NULL DEFAULT '[]',reviewed INTEGER NOT NULL DEFAULT 0,created REAL NOT NULL);
               CREATE TABLE IF NOT EXISTS memories(id INTEGER PRIMARY KEY,content TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1,source TEXT NOT NULL DEFAULT 'user',supersedes INTEGER,created REAL NOT NULL,updated REAL NOT NULL,FOREIGN KEY(supersedes) REFERENCES memories(id));
             """)
+            columns={row[1] for row in c.execute("PRAGMA table_info(tasks)")}
+            if "success_checkpoint" not in columns:c.execute("ALTER TABLE tasks ADD COLUMN success_checkpoint TEXT")
+            if "current_image" not in columns:c.execute("ALTER TABLE tasks ADD COLUMN current_image TEXT")
+            # Old checkpoint values may have pointed at an interrupted image. In
+            # that case replaying is safe because sample and task commits are idempotent.
+            c.execute("UPDATE tasks SET success_checkpoint=CASE WHEN status='completed' THEN checkpoint ELSE NULL END WHERE success_checkpoint IS NULL")
 
     @contextmanager
     def connect(self):
@@ -163,12 +170,38 @@ class Store:
             return c.execute("SELECT * FROM tasks ORDER BY updated DESC").fetchall()
 
     def update_task(self, tid, **fields):
-        allowed = {"status", "processed", "checkpoint", "error"}
+        allowed = {"status", "processed", "checkpoint", "success_checkpoint", "current_image", "error"}
         pairs = [(k, v) for k, v in fields.items() if k in allowed]
         if pairs:
             pairs.append(("updated", time.time()))
             with self.connect() as c:
                 c.execute("UPDATE tasks SET " + ",".join(f"{k}=?" for k, _ in pairs) + " WHERE id=?", [v for _, v in pairs] + [tid])
+
+    def set_task_current_image(self, tid, image_path):
+        """Record work in progress without advancing the last-successful cursor."""
+        with self.connect() as c:
+            c.execute("UPDATE tasks SET current_image=?,updated=? WHERE id=?",(str(image_path),time.time(),tid))
+
+    def commit_task_sample(self, tid, sample_id, image_path, annotation=None):
+        """Atomically commit annotation, unique per-task count, and success cursor."""
+        with self.connect() as c:
+            if annotation is not None:
+                labels=list(annotation.get("labels") or [])
+                if annotation.get("needs_human_review"):labels.append("需要人工复核")
+                changed=c.execute("UPDATE samples SET category=?,ocr=?,labels=?,reviewed=0 WHERE id=?",
+                                  (annotation["page_type"],annotation["ocr"],json.dumps(labels,ensure_ascii=False),sample_id))
+                if changed.rowcount!=1:raise ValueError("样本不存在，拒绝提交任务检查点")
+            else:
+                if not c.execute("SELECT 1 FROM samples WHERE id=?",(sample_id,)).fetchone():
+                    raise ValueError("样本不存在，拒绝提交任务检查点")
+            cur=c.execute("INSERT OR IGNORE INTO task_samples(task_id,sample_id,image_path,created) VALUES(?,?,?,?)",
+                          (tid,sample_id,str(image_path),time.time()))
+            added=cur.rowcount==1
+            if added:c.execute("UPDATE tasks SET processed=processed+1 WHERE id=?",(tid,))
+            c.execute("UPDATE tasks SET checkpoint=?,success_checkpoint=?,current_image=NULL,status='running',error=NULL,updated=? WHERE id=?",
+                      (str(image_path),str(image_path),time.time(),tid))
+            row=c.execute("SELECT processed FROM tasks WHERE id=?",(tid,)).fetchone()
+            return added,int(row["processed"])
 
     def import_image(self, path: Path, source="本地文件夹") -> tuple[bool, str]:
         h=hashlib.sha256()

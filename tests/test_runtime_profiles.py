@@ -21,6 +21,10 @@ class RuntimeProfileTests(unittest.TestCase):
             runtime.set_profile("iq3_s_vulkan")
             self.assertEqual(runtime.profile["backend"],"Vulkan")
             self.assertIn("vulkan",runtime.profile["runtime"])
+            runtime.set_profile("iq2_m_vulkan")
+            self.assertEqual(runtime.profile["backend"],"Vulkan")
+            self.assertEqual(runtime.profile["model"],MODEL_PROFILES["iq2_m_cuda"]["model"])
+            self.assertEqual(runtime.context_size,MODEL_PROFILES["iq2_m_cuda"]["context"])
             with self.assertRaises(ValueError):runtime.set_profile("unknown")
 
     def test_context_uses_exact_counter_and_keeps_first_constraint_and_latest_turn(self):

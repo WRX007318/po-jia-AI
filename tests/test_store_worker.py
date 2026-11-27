@@ -73,8 +73,9 @@ class StoreWorkerTests(unittest.TestCase):
             with patch("vision_worker.urllib.request.urlopen",return_value=health),patch("vision_worker.analyze",side_effect=RuntimeError("synthetic timeout")):
                 worker.run_task(s.task(tid))
             task=s.task(tid)
-            self.assertEqual(task["status"],"waiting_model")
-            self.assertTrue(task["checkpoint"].endswith("a.png"))
+            self.assertEqual(task["status"],"error")
+            self.assertFalse(task["checkpoint"])
+            self.assertTrue(task["current_image"].endswith("a.png"))
             self.assertEqual(task["processed"],0)
 
     def test_hard_visual_timeout_remains_error_with_retry_checkpoint(self):
@@ -91,7 +92,8 @@ class StoreWorkerTests(unittest.TestCase):
             task=s.task(tid)
             self.assertEqual(task["status"],"error")
             self.assertIn("超过 0.1 秒",task["error"])
-            self.assertTrue(task["checkpoint"].endswith("a.png"))
+            self.assertFalse(task["checkpoint"])
+            self.assertTrue(task["current_image"].endswith("a.png"))
             self.assertEqual(task["processed"],0)
 
     def test_resume_counts_imported_but_unannotated_unique_sample(self):
@@ -106,6 +108,134 @@ class StoreWorkerTests(unittest.TestCase):
             self.assertEqual(task["status"],"completed")
             self.assertEqual(task["processed"],1)
             self.assertEqual(len(s.samples()),1)
+
+    def test_sample_annotation_count_and_success_cursor_commit_atomically_once(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td);image=root/"fixture.png";image.write_bytes(FIXTURE.read_bytes())
+            store=Store(root/"db");tid=store.create_task(str(root),10);_,digest=store.import_image(image)
+            sid=digest[:24];store.set_task_current_image(tid,image)
+            before=store.task(tid)
+            self.assertFalse(before["success_checkpoint"])
+            self.assertEqual(before["current_image"],str(image))
+            annotation={"page_type":"业务页","ocr":"样本","labels":["普通"],"needs_human_review":False}
+            self.assertEqual(store.commit_task_sample(tid,sid,image,annotation),(True,1))
+            reopened=Store(root/"db");task=reopened.task(tid)
+            self.assertEqual(task["success_checkpoint"],str(image))
+            self.assertIsNone(task["current_image"])
+            self.assertEqual(task["processed"],1)
+            self.assertEqual(reopened.commit_task_sample(tid,sid,root/"duplicate.png"),(False,1))
+
+    def test_failure_then_database_reopen_retries_current_image_without_skipping(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td);source=root/"src";source.mkdir();image=source/"a.png";image.write_bytes(FIXTURE.read_bytes())
+            store=Store(root/"db");tid=store.create_task(str(source),1);worker=Worker(root/"db")
+            health=MagicMock();health.__enter__.return_value=health;health.__exit__.return_value=False
+            with patch("vision_worker.urllib.request.urlopen",return_value=health),patch("vision_worker.analyze",side_effect=RuntimeError("injected schema error")):
+                worker.run_task(store.task(tid))
+            failed=Store(root/"db").task(tid)
+            self.assertEqual(failed["status"],"error")
+            self.assertFalse(failed["success_checkpoint"])
+            self.assertEqual(failed["current_image"],str(image))
+            self.assertEqual(failed["processed"],0)
+            resumed=Store(root/"db");resumed.update_task(tid,status="queued",error=None)
+            annotation={"page_type":"业务页","ocr":"恢复后成功","labels":["普通"],"needs_human_review":False}
+            with patch("vision_worker.urllib.request.urlopen",return_value=health),patch("vision_worker.analyze",return_value=annotation):
+                Worker(root/"db").run_task(Store(root/"db").task(tid))
+            recovered=Store(root/"db");complete=recovered.task(tid)
+            self.assertEqual(complete["status"],"completed")
+            self.assertEqual(complete["success_checkpoint"],str(image))
+            self.assertIsNone(complete["current_image"])
+            self.assertEqual(complete["processed"],1)
+            self.assertEqual(recovered.samples()[0]["ocr"],"恢复后成功")
+
+    def test_pause_and_stop_do_not_advance_success_cursor(self):
+        for action in ("pause","stop"):
+            with self.subTest(action=action),tempfile.TemporaryDirectory() as td:
+                root=Path(td);source=root/"src";source.mkdir();image=source/"a.png";image.write_bytes(FIXTURE.read_bytes())
+                store=Store(root/"db");tid=store.create_task(str(source),1);worker=Worker(root/"db")
+                health=MagicMock();health.__enter__.return_value=health;health.__exit__.return_value=False
+                calls=[]
+                def interrupted(*_args,**_kwargs):
+                    calls.append(1)
+                    if action=="stop" or len(calls)==1:getattr(worker,action).set()
+                    return {"page_type":"业务页","ocr":"尚未提交","labels":[],"needs_human_review":False}
+                with patch("vision_worker.urllib.request.urlopen",return_value=health),patch("vision_worker.analyze",side_effect=interrupted):
+                    if action=="pause":
+                        thread=threading.Thread(target=worker.run_task,args=(store.task(tid),),daemon=True);thread.start()
+                        deadline=time.monotonic()+3
+                        while Store(root/"db").task(tid)["status"]!="paused" and time.monotonic()<deadline:time.sleep(.02)
+                        paused=Store(root/"db").task(tid)
+                        self.assertEqual(paused["status"],"paused")
+                        self.assertFalse(paused["success_checkpoint"])
+                        self.assertEqual(paused["current_image"],str(image))
+                        self.assertEqual(paused["processed"],0)
+                        worker.pause.clear();thread.join(3)
+                        self.assertFalse(thread.is_alive())
+                        self.assertEqual(Store(root/"db").task(tid)["status"],"completed")
+                    else:
+                        worker.run_task(store.task(tid))
+                        task=Store(root/"db").task(tid)
+                        self.assertEqual(task["status"],"stopped")
+                        self.assertFalse(task["success_checkpoint"])
+                        self.assertEqual(task["current_image"],str(image))
+                        self.assertEqual(task["processed"],0)
+
+    def test_unstoppable_inference_fault_isolates_worker_and_keeps_shared_lease(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td);source=root/"src";source.mkdir();image=source/"a.png";image.write_bytes(FIXTURE.read_bytes())
+            store=Store(root/"db");tid=store.create_task(str(source),1);worker=Worker(root/"db",analysis_timeout=.1,cancel_grace=.1)
+            health=MagicMock();health.__enter__.return_value=health;health.__exit__.return_value=False
+            blocked=threading.Event();started=threading.Event()
+            leases=[]
+            class FakeLease:
+                def __init__(self,*_args):self.released=False;leases.append(self)
+                def acquire(self,**_kwargs):return True
+                def release(self):self.released=True
+            def never_stops(*_args,**_kwargs):
+                started.set();blocked.wait(10)
+                raise InterruptedError("released by test cleanup")
+            with patch("vision_worker.InferenceLease",FakeLease),patch("vision_worker.urllib.request.urlopen",return_value=health),patch("vision_worker.analyze",side_effect=never_stops):
+                worker.run_task(store.task(tid))
+            task=Store(root/"db").task(tid)
+            self.assertTrue(started.is_set())
+            self.assertTrue(worker.fault_isolated)
+            self.assertEqual(task["status"],"faulted")
+            self.assertFalse(task["success_checkpoint"])
+            self.assertEqual(task["current_image"],str(image))
+            self.assertEqual(len(worker._held_leases),1)
+            self.assertFalse(leases[0].released)
+            blocked.set()
+
+    def test_fault_isolated_worker_holds_lease_until_slot_is_confirmed_idle(self):
+        with tempfile.TemporaryDirectory() as td:
+            worker=Worker(Path(td))
+            class Lease:
+                released=False
+                def release(self):self.released=True
+            lease=Lease();worker._held_leases=[lease];worker.fault_isolated=True;worker._stop_worker=True
+            from vision_worker import InferenceIsolationError
+            with patch("vision_worker.wait_for_model_slot_idle",side_effect=[InferenceIsolationError("still busy"),True]) as idle, patch.object(worker.stop,"wait",return_value=False):
+                worker.serve()
+            self.assertEqual(idle.call_count,2)
+            self.assertTrue(lease.released)
+            self.assertFalse(worker.fault_isolated)
+
+    def test_shared_inference_queue_wait_is_bounded(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td);source=root/"src";source.mkdir();image=source/"a.png";image.write_bytes(FIXTURE.read_bytes())
+            store=Store(root/"db");tid=store.create_task(str(source),1);worker=Worker(root/"db",lease_wait_timeout=.1)
+            health=MagicMock();health.__enter__.return_value=health;health.__exit__.return_value=False
+            class BusyLease:
+                def __init__(self,*_args):pass
+                def acquire(self,**_kwargs):return False
+                def release(self):pass
+            with patch("vision_worker.InferenceLease",BusyLease),patch("vision_worker.urllib.request.urlopen",return_value=health):
+                worker.run_task(store.task(tid))
+            task=Store(root/"db").task(tid)
+            self.assertEqual(task["status"],"error")
+            self.assertIn("推理队列超过 0.1 秒",task["error"])
+            self.assertFalse(task["success_checkpoint"])
+            self.assertEqual(task["current_image"],str(image))
 
     def test_model_sha256_guard_and_start_refusal(self):
         with tempfile.TemporaryDirectory() as td:

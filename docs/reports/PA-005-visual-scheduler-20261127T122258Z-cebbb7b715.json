@@ -1,0 +1,8 @@
+{
+  "run_id": "20261127T122258Z-cebbb7b715",
+  "test": "visual-scheduler",
+  "passed": false,
+  "database": "isolated application Store",
+  "error_type": "SystemExit",
+  "error": "worker did not resume visual inference: task={'id': '988de43b-6525-4ffa-8935-c2a09904e97a', 'source': 'C:\\\\Users\\\\ADMINI~1\\\\AppData\\\\Local\\\\Temp\\\\pa005-visual-worker-ocqqviul\\\\authorized-synthetic-source', 'status': 'completed', 'limit_count': 1, 'processed': 0, 'checkpoint': '', 'error': None, 'updated': 1795782180.719291, 'success_checkpoint': '', 'current_image': None}, thread_errors=[]"
+}

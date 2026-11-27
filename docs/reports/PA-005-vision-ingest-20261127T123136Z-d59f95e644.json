@@ -1,0 +1,22 @@
+{
+  "run_id": "20261127T123136Z-d59f95e644",
+  "test": "vision-ingest",
+  "passed": true,
+  "database": "isolated temporary application Store",
+  "standard_ocr_hits": {
+    "业务订单管理": true,
+    "订单列表": true,
+    "PJ-2026-001": true,
+    "PJ-2026-002": true,
+    "已完成": true,
+    "处理中": true
+  },
+  "task_completed": true,
+  "unique_samples": 1,
+  "processed_count": 1,
+  "ocr_characters": 57,
+  "human_correction_persisted": true,
+  "restart_recovery": true,
+  "elapsed_seconds": 7.4,
+  "model": "Inkling-2-Mini-Uncensored-AD-IQ2_M.gguf"
+}

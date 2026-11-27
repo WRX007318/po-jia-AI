@@ -220,6 +220,10 @@ class Workbench(tk.Tk):
         ttk.Button(row,text="停止并释放资源",command=self.stop_runtime).pack(side="left",padx=8)
         ttk.Button(row,text="校验 / 下载所选模型",command=lambda:self.background(self.bootstrap_all)).pack(side="left")
         ttk.Button(row,text="打开模型目录",command=lambda:os.startfile(MODELS) if MODELS.exists() else None).pack(side="left")
+        tuning=ttk.Frame(f);tuning.pack(fill="x",pady=(0,8))
+        ttk.Label(tuning,text="CUDA GPU 卸载层数（1–99；应用配置后重启服务生效）").pack(side="left")
+        self.gpu_layers_var=tk.IntVar(value=self.settings["gpu_layers"])
+        ttk.Spinbox(tuning,from_=1,to=99,width=5,textvariable=self.gpu_layers_var).pack(side="left",padx=8)
         self.model_log=tk.Text(f,bg="white",bd=0);self.model_log.pack(fill="both",expand=True)
 
     def bootstrap_all(self):
@@ -309,6 +313,7 @@ class Workbench(tk.Tk):
                    "system_prompt":self.system_prompt_editor.get("1.0","end").strip(),
                    "behavior_rules":self.behavior_rules_editor.get("1.0","end").strip(),
                    "runtime_profile":self.settings["runtime_profile"],
+                   "gpu_layers":self.settings["gpu_layers"],
                    "context_budget_tokens":self.context_budget.get(),
                    "auto_continue":self.auto_continue.get(),
                    "auto_continue_limit":self.auto_continue_limit.get()}
@@ -529,7 +534,7 @@ class Workbench(tk.Tk):
         try:
             old_profile=self.runtime.profile_id
             self.runtime.set_profile(profile_id)
-            candidate=dict(self.settings,runtime_profile=profile_id)
+            candidate=dict(self.settings,runtime_profile=profile_id,gpu_layers=self.gpu_layers_var.get())
             candidate["context_budget_tokens"]=min(candidate["context_budget_tokens"],self.runtime.context_size-512)
             try:self.settings=self.settings_store.save(candidate)
             except Exception:
@@ -538,7 +543,7 @@ class Workbench(tk.Tk):
             self.context_budget.set(self.settings["context_budget_tokens"])
             self.model_info.delete("1.0","end")
             p=self.runtime.profile
-            self.model_info.insert("end",f"配置：{profile_id}（{p['label']}）\n后端：{p['backend']}\n模型：{p['model']}\n运行时：{ROOT / p['runtime']}\n模型目录：{MODELS}\n视觉组件：mmproj F16\n输入预算：{self.settings['context_budget_tokens']} tokens；输出预留 512 tokens\n"
+            self.model_info.insert("end",f"配置：{profile_id}（{p['label']}）\n后端：{p['backend']}\n模型：{p['model']}\nGPU 卸载层数：{self.settings['gpu_layers']}\n上下文：{p['context']} tokens；输入预算：{self.settings['context_budget_tokens']}；输出预留 512\n运行时：{ROOT / p['runtime']}\n模型目录：{MODELS}\n视觉组件：mmproj F16\n"
                 f"当前端口服务状态：{self.runtime.status()}\n若服务载入了其他模型，请先在模型管理中正常停止该服务，再启动所选配置。")
             self.settings_status.set(f"推理配置已存为版本 {self.settings['revision']}；服务重启后生效。")
         except Exception as exc:
@@ -560,7 +565,7 @@ class Workbench(tk.Tk):
 
     def start_runtime(self):
         try:
-            self.runtime.start();self.after(0,lambda:messagebox.showinfo(APP,"本地模型服务已就绪。"))
+            self.runtime.start(gpu_layers=self.settings["gpu_layers"]);self.after(0,lambda:messagebox.showinfo(APP,"本地模型服务已就绪。"))
         except Exception as e:self.after(0,lambda:messagebox.showerror(APP,str(e)))
 
     def stop_runtime(self):
@@ -576,7 +581,7 @@ class Workbench(tk.Tk):
         if hasattr(self,"model_log") and self.pages["models"].winfo_ismapped():
             self.model_info.delete("1.0","end")
             p=self.runtime.profile
-            self.model_info.insert("end",f"配置：{self.runtime.profile_id}（{p['label']}）\n后端：{p['backend']}\n模型：{p['model']}\n运行时：{ROOT/p['runtime']}\n模型与视觉文件：{MODELS}\n服务状态：{state}；回环地址：{self.runtime.base}\n输入预算：{self.settings['context_budget_tokens']} tokens，另预留 512 tokens 输出。\n")
+            self.model_info.insert("end",f"配置：{self.runtime.profile_id}（{p['label']}）\n后端：{p['backend']}\n模型：{p['model']}\nGPU 卸载层数：{self.settings['gpu_layers']}\n上下文：{p['context']} tokens\n运行时：{ROOT/p['runtime']}\n模型与视觉文件：{MODELS}\n服务状态：{state}；回环地址：{self.runtime.base}\n输入预算：{self.settings['context_budget_tokens']} tokens，另预留 512 tokens 输出。\n")
             self.model_log.delete("1.0","end");self.model_log.insert("end",f"模型文件存在（启动前执行完整 SHA-256 校验）：{(MODELS/p['model']).exists()}\n视觉组件文件存在（启动前执行完整 SHA-256 校验）：{(MODELS/'mmproj-Inkling-2-Mini-Uncensored-F16.gguf').exists()}\n")
         self.after(2500,self.refresh)
 

@@ -42,6 +42,16 @@ class SettingsStoreTests(unittest.TestCase):
             self.assertEqual(rolled["system_prompt"],"第一版")
             self.assertEqual([x["revision"] for x in store.versions()][:2],[rolled["revision"],two["revision"]])
 
+    def test_gpu_layer_override_is_bounded_versioned_and_rollbackable(self):
+        with tempfile.TemporaryDirectory() as td:
+            store=SettingsStore(Path(td));base=store.load()
+            low=store.save(dict(base,gpu_layers=96))
+            self.assertEqual(low["gpu_layers"],96)
+            with self.assertRaisesRegex(ValueError,"GPU 卸载层数"):
+                store.save(dict(low,gpu_layers=0))
+            restored=store.rollback_to(base["revision"])
+            self.assertEqual(restored["gpu_layers"],99)
+
     def test_invalid_existing_file_is_preserved_until_valid_replacement(self):
         with tempfile.TemporaryDirectory() as td:
             store=SettingsStore(Path(td));store.root.mkdir(parents=True,exist_ok=True)

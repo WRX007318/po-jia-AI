@@ -17,6 +17,18 @@ from service_endpoint import service_base
 
 
 MODEL_PROFILES = {
+    "iq2_m_vulkan": {
+        "label": "IQ2_M / Vulkan（CUDA 回滚对照）",
+        "model": DEFAULT_MODEL,
+        "runtime": "runtime-vulkan-b12774-backup",
+        "backend": "Vulkan",
+        "gpu_layers": 99,
+        "cpu_moe": None,
+        "context": 4096,
+        "threads": 4,
+        "threads_batch": 4,
+        "extra": ["--mmproj-offload", "-fa", "on", "--cache-type-k", "q8_0", "--cache-type-v", "q8_0"],
+    },
     "iq2_m_cuda": {
         "label": "IQ2_M / CUDA（推荐）",
         "model": DEFAULT_MODEL,
@@ -200,6 +212,8 @@ class Runtime:
         if self.status()=="foreign":
             raise RuntimeError("59871 端口已有其他模型服务，占用本地服务地址；已拒绝使用错误模型实例。")
         gpu_layers = self.profile["gpu_layers"] if gpu_layers is None else gpu_layers
+        if not isinstance(gpu_layers,int) or isinstance(gpu_layers,bool) or not 1<=gpu_layers<=99:
+            raise ValueError("GPU 卸载层数必须是 1–99 的整数")
         context = self.profile["context"] if context is None else context
         threads = self.profile["threads"] if threads is None else threads
         threads = max(1, min(os.cpu_count() or 4, threads))

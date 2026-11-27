@@ -1,5 +1,13 @@
 # PA-003 实施决策日志
 
+## 2026-11-27 — PA-006 visual cursor and cancellation isolation
+
+- Every visual task now stores `success_checkpoint` independently from `current_image`; the compatibility `checkpoint` column mirrors only the last transactionally committed item. Older unfinished tasks replay from the beginning rather than risk skipping an image.
+- Image annotation, per-task unique-sample accounting, and successful cursor advancement commit in one SQLite transaction. An imported image with no committed annotation remains resumable at `current_image`.
+- Visual model execution uses a daemon worker thread with a bounded cancel grace. If inference does not stop, the worker moves the task to `faulted`, stops scheduling, and intentionally retains the process-shared inference lease. It does not release the GPU slot to another local agent based on an unconfirmed cancellation.
+- Stream completion requires both SSE `[DONE]` and `finish_reason=stop`; OCR, model inference, JSON Schema validation, and model identity lookup share a 20 second budget. Slot-drain checks are bounded and fail closed.
+- Actual IQ2_M visual recognition and isolated-store tests pass after this change. CUDA/Vulkan matrix and final desktop workflow remain pending; no GPU profile change is claimed from source inspection alone.
+
 ## 2026-11-27 — PA-005 local inference ownership and recovery
 
 - A single cross-process file lease serializes chat, visual analysis, and the independent visual worker against the shared llama.cpp slot.

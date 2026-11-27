@@ -15,6 +15,7 @@ DEFAULTS = {
     "system_prompt": "你是破甲 AI，本地运行的中文助手。清楚区分已验证事实与推测；不要声称执行了未实际完成的操作。",
     "behavior_rules": "",
     "runtime_profile": "iq2_m_cuda",
+    "gpu_layers": 99,
     "context_budget_tokens": 3072,
     "auto_continue": False,
     "auto_continue_limit": 2,
@@ -54,8 +55,11 @@ class SettingsStore:
         rules=merged["behavior_rules"]
         if not isinstance(rules,str) or len(rules)>8000:
             raise ValueError("行为规则必须为不超过 8000 个字符的文本")
-        if merged["runtime_profile"] not in {"iq2_m_cuda","iq3_s_cuda","iq3_s_vulkan"}:
+        if merged["runtime_profile"] not in {"iq2_m_cuda","iq2_m_vulkan","iq3_s_cuda","iq3_s_vulkan"}:
             raise ValueError("推理配置必须选择 IQ2_M CUDA、IQ3_S CUDA 或 IQ3_S Vulkan")
+        layers=merged["gpu_layers"]
+        if not isinstance(layers,int) or isinstance(layers,bool) or not 1<=layers<=99:
+            raise ValueError("GPU 卸载层数必须是 1–99 的整数")
         budget = merged["context_budget_tokens"]
         if not isinstance(budget, int) or isinstance(budget, bool) or not 512 <= budget <= 16000:
             raise ValueError("上下文预算必须在 512–16000 tokens 之间")

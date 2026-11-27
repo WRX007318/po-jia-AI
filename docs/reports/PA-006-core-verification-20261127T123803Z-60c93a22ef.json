@@ -1,0 +1,64 @@
+{
+  "run_id": "20261127T123803Z-60c93a22ef",
+  "scope": "PA-006 source and worker verification snapshot",
+  "source_commit": "5e102d6c1c8e14fb136583e8a0c55252e6ca42cf",
+  "created_utc": "2026-11-27T12:38:03Z",
+  "automated": {
+    "unittest_discover": "passed",
+    "tests_run": 60,
+    "compileall_app_tests": "passed",
+    "git_diff_check": "passed"
+  },
+  "hardware_observation": {
+    "driver": "621.40",
+    "gpu": "RTX 3060 12GB",
+    "memory_total_mib": 12288,
+    "memory_used_mib": 10675,
+    "utilization_percent": 42,
+    "model_service_pid": 2568,
+    "model_service": "IQ2_M CUDA, context 4096, GPU layers 99, Q8 K/V",
+    "per_process_memory_attribution": "unavailable under WDDM"
+  },
+  "live_model_acceptance": {
+    "status": "not_run",
+    "reason": "The active desktop session and model service were in use; changing or restarting them would interrupt the user.",
+    "vram_gate": "not_met_at_observation: 10675 MiB > 10500 MiB",
+    "cuda_vulkan_comparison": "not_run",
+    "reasoning_test": "not_run",
+    "text_speed_json_and_20_turn_gates": "not_run"
+  },
+  "live_visual_evidence": [
+    {
+      "run_id": "20261127T123136Z-d59f95e644",
+      "report": "PA-005-vision-ingest-20261127T123136Z-d59f95e644.json",
+      "result": "passed",
+      "elapsed_seconds": 7.4,
+      "unique_samples": 1,
+      "processed_count": 1,
+      "ocr_characters": 57,
+      "human_correction_persisted": true,
+      "database_reopen_recovery": true,
+      "model": "Inkling-2-Mini-Uncensored-AD-IQ2_M.gguf"
+    },
+    {
+      "run_id": "20261127T123149Z-131cabecc3",
+      "report": "PA-005-visual-scheduler-20261127T123149Z-131cabecc3.json",
+      "result": "passed",
+      "pause_resume_stop": true,
+      "model_slot_idle_after_stop": true,
+      "service_healthy": true,
+      "model": "Inkling-2-Mini-Uncensored-AD-IQ2_M.gguf"
+    }
+  ],
+  "desktop_acceptance": {
+    "status": "not_run",
+    "computer_agent_multi_step_gui": "not_run",
+    "behavior_modifier_gui": "not_run",
+    "20_turns_long_text_cancel_resume_restart_and_packaging": "not_run"
+  },
+  "limitations": [
+    "The successful visual ingest and scheduler records are real IQ2_M service runs but predate PA-006 and do not constitute complete PA-006 desktop acceptance.",
+    "The VRAM observation includes multiple WDDM graphics processes and NVIDIA did not expose per-process memory; attribution is unresolved.",
+    "No CUDA/Vulkan comparison or GPU-offload parameter matrix was performed in this run."
+  ]
+}
