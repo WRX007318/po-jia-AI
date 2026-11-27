@@ -17,10 +17,14 @@ REVISION = "82b34b9b0e5bc2e3e7b6d617ec8cc3e0f9692ee2"
 FILES = {
     # The `lfs.oid` values from the pinned HF tree API are the content SHA-256.
     # `xetHash` and the Resolve ETag are Xet content identifiers, not SHA-256.
+    "Inkling-2-Mini-Uncensored-AD-IQ2_M.gguf": (8665091680, "fca99d488bff5d401c8bc6b0110c5377c743f0ffb3a6d19c1ae4a3b9071fa2cd"),
     "Inkling-2-Mini-Uncensored-AD-IQ3_S.gguf": (13340510176, "23a8e6792481b6f1d0ebad51399e9ee2a2c2be8525b09ed1ae6737811159f892"),
     "mmproj-Inkling-2-Mini-Uncensored-F16.gguf": (639348448, "5a72e0b6e2bef13c3f455f4edb85df0c752b92ff76ab46af879eae088163efe6"),
 }
+DEFAULT_MODEL = "Inkling-2-Mini-Uncensored-AD-IQ2_M.gguf"
+VISION_PROJECTOR = "mmproj-Inkling-2-Mini-Uncensored-F16.gguf"
 XET_HASHES = {
+    "Inkling-2-Mini-Uncensored-AD-IQ2_M.gguf": "1d983a50f3c3ba36588b49399c5654325b93f773aaf4b185d8b0aa0c990caf79",
     "Inkling-2-Mini-Uncensored-AD-IQ3_S.gguf": "d1cbd09d44094420c7fda8c4fa7689d2d56a0070d5a2ada50d0e992b96ed5a81",
     "mmproj-Inkling-2-Mini-Uncensored-F16.gguf": "88cd139393afcf0342de8983c41f5b388adcdbf764c04b5ec13661e63451feeb",
 }
@@ -37,10 +41,16 @@ def sha256(path: Path):
     return h.hexdigest()
 
 
-def check_model_dir():
+def required_files(model_name=DEFAULT_MODEL):
+    if model_name not in FILES or model_name == VISION_PROJECTOR:
+        raise ValueError(f"不支持的模型配置：{model_name}")
+    return {model_name: FILES[model_name], VISION_PROJECTOR: FILES[VISION_PROJECTOR]}
+
+
+def check_model_dir(model_name=DEFAULT_MODEL):
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     valid = True
-    for name, (size, oid) in FILES.items():
+    for name, (size, oid) in required_files(model_name).items():
         path = MODEL_DIR / name
         if not path.exists():
             valid = False
@@ -53,9 +63,9 @@ def check_model_dir():
     return valid
 
 
-def download(progress=None, cancel=None):
+def download(progress=None, cancel=None, model_name=DEFAULT_MODEL):
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    for name, (expected_size, expected_hash) in FILES.items():
+    for name, (expected_size, expected_hash) in required_files(model_name).items():
         target = MODEL_DIR / name
         if target.exists() and target.stat().st_size == expected_size and sha256(target) == expected_hash:
             continue

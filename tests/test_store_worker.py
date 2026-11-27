@@ -93,13 +93,15 @@ class StoreWorkerTests(unittest.TestCase):
     def test_model_sha256_guard_and_start_refusal(self):
         with tempfile.TemporaryDirectory() as td:
             root=Path(td);model_dir=root/"models";model_dir.mkdir();file=model_dir/"tiny.gguf";file.write_bytes(b"trusted content")
+            mmproj=model_dir/"tiny-mmproj.gguf";mmproj.write_bytes(b"projector")
             import hashlib
             digest=hashlib.sha256(file.read_bytes()).hexdigest()
-            with patch.object(bootstrap,"MODEL_DIR",model_dir),patch.object(bootstrap,"FILES",{"tiny.gguf":(len(file.read_bytes()),digest)}):
-                self.assertTrue(bootstrap.check_model_dir())
+            mmhash=hashlib.sha256(mmproj.read_bytes()).hexdigest()
+            with patch.object(bootstrap,"MODEL_DIR",model_dir),patch.object(bootstrap,"VISION_PROJECTOR","tiny-mmproj.gguf"),patch.object(bootstrap,"FILES",{"tiny.gguf":(len(file.read_bytes()),digest),"tiny-mmproj.gguf":(len(mmproj.read_bytes()),mmhash)}):
+                self.assertTrue(bootstrap.check_model_dir("tiny.gguf"))
                 file.write_bytes(b"changed content")
                 with self.assertRaisesRegex(RuntimeError,"SHA-256 不匹配"):
-                    bootstrap.check_model_dir()
+                    bootstrap.check_model_dir("tiny.gguf")
             with patch("runtime.check_model_dir",return_value=False):
                 with self.assertRaisesRegex(RuntimeError,"SHA-256 校验"):
                     Runtime(root,model_dir).start()

@@ -13,6 +13,7 @@ from pathlib import Path
 
 from store import Store
 from vision_pipeline import analyze
+from inference_lock import InferenceLease
 
 
 class Worker:
@@ -105,26 +106,34 @@ class Worker:
         while not self.stop.is_set():
             while self.pause.is_set() and not self.stop.is_set():
                 self.stop.wait(.25);self.serve_once()
+            lease=InferenceLease(self.store.root/"inference.lock")
+            if not lease.acquire(cancel_event=self.stop,pause_event=self.pause,timeout=.25):
+                self.serve_once()
+                continue
             pool=concurrent.futures.ThreadPoolExecutor(max_workers=1)
-            future=pool.submit(analyze,path)
-            retry=False
-            while not future.done():
-                self.stop.wait(.25);self.serve_once()
-                if self.stop.is_set() or self.pause.is_set():
-                    try:
-                        req=urllib.request.Request("http://127.0.0.1:59871/slots/0?action=cancel",method="POST")
-                        urllib.request.urlopen(req,timeout=2).close()
-                    except Exception:pass
-                    future.cancel();pool.shutdown(wait=False,cancel_futures=True)
-                    if self.stop.is_set():return None
-                    retry=True;break
-            if retry:continue
-            pool.shutdown(wait=False)
             try:
+                future=pool.submit(analyze,path,120,None,True)
+                retry=False;cancel_sent=False
+                while not future.done():
+                    self.stop.wait(.15);self.serve_once()
+                    if (self.stop.is_set() or self.pause.is_set()) and not cancel_sent:
+                        try:
+                            req=urllib.request.Request("http://127.0.0.1:59871/slots/0?action=cancel",method="POST")
+                            urllib.request.urlopen(req,timeout=2).close()
+                        except Exception:pass
+                        cancel_sent=True
+                    if cancel_sent and future.done():break
+                    if self.stop.is_set() or self.pause.is_set():
+                        retry=True
+                if self.stop.is_set():return None
+                if retry:continue
                 return future.result()
             except Exception as e:
                 self.store.update_task(self._active_task,status="waiting_model",error=f"视觉识别暂不可用，稍后从同一检查点重试：{e}",checkpoint=self._active_checkpoint)
                 return None
+            finally:
+                pool.shutdown(wait=True,cancel_futures=True)
+                lease.release()
         return None
 
     def serve(self):
