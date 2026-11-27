@@ -1,0 +1,50 @@
+{
+  "run_id": "20261127T124739Z-a22d540e91",
+  "scope": "PA-006 bounded Computer Agent sequence source and regression verification",
+  "created_utc": "2026-11-27T12:47:39Z",
+  "automated": {
+    "unittest_discover": "passed",
+    "tests_run": 62,
+    "compileall_app_tests": "passed",
+    "git_diff_check": "passed",
+    "isolated_workspace_sequence": {
+      "environment": "automated test using a temporary workspace; not the desktop program",
+      "operations": ["create file", "edit same file", "read back and compare"],
+      "per_mutation_approval": "passed",
+      "step_budget_rejection": "passed",
+      "invalid_sequence_atomic_rejection": "passed"
+    }
+  },
+  "implementation": {
+    "operation_sequence_max": 8,
+    "task_step_budget": "enforced",
+    "immutable_specs": "validated typed operations frozen before preview",
+    "scope_validation": "concrete plans are created and revalidated just in time after prior steps",
+    "approval": "separate one-time approval for each mutating concrete plan",
+    "failure_behavior": "remaining sequence invalidated; task pauses on just-in-time validation failure",
+    "resume_limitation": "sequence itself is not persisted; after process restart, user must replan remaining operations"
+  },
+  "live_desktop_acceptance": {
+    "status": "not_run",
+    "reason": "User requested that desktop control wait until they finish their current interaction.",
+    "computer_agent_gui_sequence": "not_run",
+    "behavior_modifier_gui": "not_run",
+    "application_restart_recovery": "not_run"
+  },
+  "hardware": {
+    "latest_sample_from_prior_run": {
+      "sample_run_id": "20261127T123803Z-60c93a22ef",
+      "driver": "621.40",
+      "gpu": "RTX 3060 12GB",
+      "memory_used_mib": 10675,
+      "gate": "failed: exceeds 10500 MiB"
+    },
+    "new_hardware_sample_in_this_run": false,
+    "cuda_vulkan_and_reasoning_matrix": "not_run"
+  },
+  "limitations": [
+    "All computer-agent sequence evidence in this report is automated isolated-workspace testing, not actual desktop UI acceptance.",
+    "The previous real IQ2_M vision and scheduler runs are separately recorded and do not establish GUI or PA-006 completion.",
+    "PA-006 overall acceptance remains incomplete."
+  ]
+}

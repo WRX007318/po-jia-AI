@@ -1,5 +1,11 @@
 # PA-003 实施决策日志
 
+## 2026-11-27 — PA-006 bounded computer-agent sequences
+
+- The desktop Agent now asks the local model for a sequence of at most eight typed operation requests, constrained by the task's remaining step budget. The entire request list is schema/permission checked and frozen before preview; concrete paths, windows, and current state are revalidated just in time before each step so a later edit/read can legitimately depend on an earlier successful write.
+- The full request sequence is previewed, but execution advances only after one explicit user click per step. Each mutating operation gets its own short-lived approval bound to the concrete plan; executor scope and paths are revalidated immediately before effect. A failed, paused, revoked, or stopped task clears all remaining plans. The sequence is not persisted as executable approvals; after pause/restart, the user must replan remaining work.
+- Backend regression exercises two approved workspace writes, a subsequent readback, step-budget rejection, and all-or-nothing validation failure. GUI interaction and cross-restart sequence continuation remain unverified pending safe desktop handoff.
+
 ## 2026-11-27 — PA-006 visual cursor and cancellation isolation
 
 - Every visual task now stores `success_checkpoint` independently from `current_image`; the compatibility `checkpoint` column mirrors only the last transactionally committed item. Older unfinished tasks replay from the beginning rather than risk skipping an image.

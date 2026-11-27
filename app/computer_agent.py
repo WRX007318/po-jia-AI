@@ -41,6 +41,16 @@ class Plan:
         return hashlib.sha256((self.action+"\0"+self.args_json+"\0"+self.scope_fingerprint).encode("utf-8")).hexdigest()
 
 
+@dataclass(frozen=True)
+class OperationSpec:
+    """Immutable requested operation; runtime scope is revalidated just before preview/approval."""
+    action: str
+    args_json: str
+
+    @property
+    def args(self):return json.loads(self.args_json)
+
+
 class ComputerAgent:
     ACTION_ARGS = {
         "list_windows": set(),
@@ -214,6 +224,28 @@ class ComputerAgent:
         self.plans[item.id] = item
         self.plan_expiry[item.id]=time.monotonic()+60
         return item
+
+    def plan_sequence(self, operations, max_sequence=20) -> tuple[OperationSpec, ...]:
+        """Freeze typed requests. Concrete plans are bound just-in-time after prior steps."""
+        if not isinstance(operations,(list,tuple)) or not operations:
+            raise ToolRejected("多步骤计划必须是非空操作列表")
+        limit=min(self.max_steps-self.steps,max(1,int(max_sequence)))
+        if len(operations)>limit:raise ToolRejected("多步骤计划超过本任务剩余步数上限")
+        frozen=[]
+        for item in operations:
+            if not isinstance(item,dict) or set(item)!={"action","args"}:
+                raise ToolRejected("每个操作必须且只能包含 action 与 args")
+            action,args=item["action"],item["args"]
+            if action not in self.ACTION_ARGS or not isinstance(args,dict):raise ToolRejected("不支持的工具或参数格式")
+            if action not in self.allowed_actions:raise ToolRejected("该工具已在独立工具权限中停用")
+            required=self.ACTION_ARGS[action];optional=self.OPTIONAL_ARGS.get(action,set())
+            if not required.issubset(args) or set(args)-required-optional:raise ToolRejected("工具参数与 schema 不匹配")
+            normalized=dict(args)
+            for key in optional:normalized.setdefault(key,None)
+            try:encoded=json.dumps(normalized,ensure_ascii=False,sort_keys=True,separators=(",",":"),allow_nan=False)
+            except (TypeError,ValueError) as exc:raise ToolRejected("操作参数不能安全序列化") from exc
+            frozen.append(OperationSpec(action,encoded))
+        return tuple(frozen)
 
     def _scope_for(self,action,args,window_identity=None):
         bound={"workspace":str(self.workspace),"window":window_identity}

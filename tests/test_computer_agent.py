@@ -29,6 +29,40 @@ class ComputerAgentTests(unittest.TestCase):
             with self.assertRaisesRegex(ToolRejected,"不存在"):
                 agent.execute(ticket,approval_ticket=ticket)
 
+    def test_bounded_sequence_keeps_each_operation_immutable_and_approves_each_write(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td);agent=ComputerAgent(root,max_steps=3);agent.begin_task()
+            specs=agent.plan_sequence([
+                {"action":"write_text","args":{"path":"one.txt","content":"one"}},
+                {"action":"write_text","args":{"path":"one.txt","content":"two"}},
+                {"action":"read_text","args":{"path":"one.txt"}},
+            ])
+            self.assertEqual(len(specs),3)
+            results=[]
+            for spec in specs:
+                plan=agent.plan(spec.action,spec.args)
+                if not plan.mutating:
+                    results.append(agent.execute(plan.id));continue
+                ticket=agent.approve(plan.id,user_confirmed=True)
+                results.append(agent.execute(ticket,approval_ticket=ticket))
+            self.assertEqual((root/"one.txt").read_text(encoding="utf-8"),"two")
+            self.assertEqual(results[-1],"two")
+            self.assertEqual(agent.steps,3)
+            self.assertTrue(agent.complete_task())
+            with self.assertRaisesRegex(ToolRejected,"剩余步数"):
+                agent.plan_sequence([{"action":"read_text","args":{"path":"one.txt"}}]*2)
+
+    def test_invalid_sequence_rolls_back_all_reserved_plans(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td);(root/"readme.txt").write_text("ok",encoding="utf-8")
+            agent=ComputerAgent(root);agent.begin_task()
+            with self.assertRaisesRegex(ToolRejected,"不支持"):
+                agent.plan_sequence([
+                    {"action":"read_text","args":{"path":"readme.txt"}},
+                    {"action":"run_shell","args":{"command":"forbidden"}},
+                ])
+            self.assertEqual(agent.plans,{})
+
     def test_paths_and_action_schema_are_restricted(self):
         with tempfile.TemporaryDirectory() as td:
             root=Path(td);agent=ComputerAgent(root);agent.begin_task()
