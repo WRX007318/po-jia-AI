@@ -1,6 +1,7 @@
 """Gate-timed independent text, JSON, and synthetic vision probes for PA-003."""
 from __future__ import annotations
 
+import argparse
 import json
 import pathlib
 import sys
@@ -11,6 +12,11 @@ ROOT=pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"app"))
 from runtime import Runtime
 
+parser=argparse.ArgumentParser()
+parser.add_argument("--vision-image",type=pathlib.Path,default=ROOT/"tests"/"fixtures"/"synthetic_business.png")
+parser.add_argument("--probe",choices=("all","text","reasoning","json","vision"),default="all")
+parser.add_argument("--vision-timeout",type=int,default=20)
+args=parser.parse_args()
 HOME=pathlib.Path(r"D:\PoJiaAI")
 rt=Runtime(HOME,HOME/"models"/"inkling2mini")
 if rt.status()!="ready":raise SystemExit("expected PA-003 local model is not ready")
@@ -48,9 +54,33 @@ def probe(name,gate,fn):
     results["tests"].append(row)
     print(json.dumps(row,ensure_ascii=False),flush=True)
 
-probe("chinese_short_answer",None,lambda:rt.chat([{"role":"user","content":"请直接用中文回答：破甲 AI 推理性能测试通过。"}],timeout=180,max_tokens=256))
-probe("structured_json",30,lambda:rt.chat([{"role":"user","content":"分析一个普通中文订单列表页面。只输出 JSON，最多列出4条重要可见文本，并给记录条数；普通业务页 needs_human_review=false。"}],timeout=30,json_schema=SCHEMA,max_tokens=512))
-probe("synthetic_vision",20,lambda:rt.chat([{"role":"user","content":"识别这张虚构普通订单列表截图。只输出 JSON：页面类别、最多4条重要可见文字、记录条数、needs_human_review。普通业务页设 false；若发现验证码或安全验证则 true，不要描述挑战内容。"}],ROOT/"tests"/"fixtures"/"synthetic_business.png",timeout=20,json_schema=SCHEMA,max_tokens=256))
+if args.probe in ("all","text"):
+    probe("chinese_short_answer",None,lambda:rt.chat([{"role":"user","content":"请直接用中文回答：破甲 AI 推理性能测试通过。"}],timeout=180,max_tokens=256))
+if args.probe=="reasoning":
+    # Follow PA-003's required order: API effort=none, final-only system prompt,
+    # then max_tokens=512 and inspect the full backend text for a separator.
+    from runtime import ChatRequest
+    import concurrent.futures
+    def chat_with_options(messages,*,options,max_tokens,timeout=90):
+        req=ChatRequest(messages=messages,model=rt.config.model_name,stream=False,max_tokens=max_tokens,temperature=0.2,reasoning_effort="none",chat_template_kwargs=options)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            fut=pool.submit(rt._request,req,timeout)
+            return fut.result(timeout=timeout+5)
+    msgs=[{"role":"user","content":"用中文简要解释 CPU、GPU 和 RAM 的区别，并给出一个实际例子。"}]
+    for label,options,system,max_tokens in (("api_effort_none",{"reasoning_effort":"none"},False,256),("system_final_only",{"reasoning_effort":"none"},True,256),("max_tokens_512_separator_check",{"reasoning_effort":"none"},True,512)):
+        current=([{"role":"system","content":"只输出最终答案，不输出分析过程、思维链或 reasoning。"}]+msgs) if system else msgs
+        def run(current=current,options=options,max_tokens=max_tokens):
+            obj=chat_with_options(current,options=options,max_tokens=max_tokens)
+            return json.dumps(obj,ensure_ascii=False)
+        probe(label,None,run)
+        obj=json.loads(results["tests"][-1].get("output","{}")) if results["tests"][-1].get("status")=="returned" else {}
+        content=(obj.get("choices") or [{}])[0].get("message",{}).get("content","")
+        results["tests"][-1]["separator_double_newline"]="\n\n" in content
+        results["tests"][-1]["backend_content_chars"]=len(content)
+if args.probe in ("all","json"):
+    probe("structured_json",30,lambda:rt.chat([{"role":"user","content":"分析一个普通中文订单列表页面。只输出 JSON，最多列出4条重要可见文本，并给记录条数；普通业务页 needs_human_review=false。"}],timeout=30,json_schema=SCHEMA,max_tokens=512))
+if args.probe in ("all","vision"):
+    probe("synthetic_vision",args.vision_timeout,lambda:rt.chat([{"role":"user","content":"识别这张虚构普通订单列表截图。只输出 JSON：页面类别、最多4条重要可见文字、记录条数、needs_human_review。普通业务页设 false；若发现验证码或安全验证则 true，不要描述挑战内容。"}],args.vision_image,timeout=args.vision_timeout,json_schema=SCHEMA,max_tokens=256))
 
 out=ROOT/"docs"/"reports"/"pa003-stage2-probes.json"
 out.parent.mkdir(parents=True,exist_ok=True)

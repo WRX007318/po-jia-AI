@@ -23,3 +23,18 @@
 - **决策：**保留该失败配置作为阶段 3 引擎比较基线；驱动/引擎切换需基于官方最低驱动要求、离线回滚材料和 PA-002 Vulkan 启动配置，升级不成功可恢复 Vulkan。
 - **回滚：**保持 IQ3_S、本机 b12774 Vulkan；可回到 PA-002 12/2048/6，或阶段1目标显存参数 99/23/2048/6。
 - **原始证据：**仅本机 `D:\PoJiaAI\logs\pa003\stage2-iq3s-ncmoe23-ctx4096-q8-fa.*.log`。
+
+## 2026-11-27 — Stage 3 driver / CUDA evaluation (incomplete)
+
+- **硬件兼容核验：**本机 Windows 10 Pro 22H2 (19045)、RTX 3060、驱动 512.15。llama.cpp b12774 提供 CUDA 12.4 Windows x64 运行时包；NVIDIA 官方 610.88 页面列出 Win10 64-bit 与 RTX 3060。CUDA 12.4 GA toolkit 对应 Windows driver 551.61；现有 512.15 不满足该 GA 要求。
+- **回滚证据：**旧显示驱动 INF `oem24.inf` 已通过 `pnputil /export-driver` 导出至本机 `D:\PoJiaAI\drivers\pa003`（1,580,357,513 bytes）；INF 签名状态 Valid。Vulkan b12774 runtime 53 个文件复制至 `D:\PoJiaAI\runtime-vulkan-b12774-backup`，逐文件 SHA256 manifest 匹配；服务 EXE 与 `ggml-vulkan.dll` 哈希已保存在本机终端输出。
+- **安装状态：**NVIDIA 610.88 官方安装包 979,651,304 bytes，SHA256 `576A90C6F6EEA47748DB1DEFCBCA1746C81FE4EB972F3132D30878778CEE0B09`，Authenticode Valid，Signer NVIDIA Corporation。启动 `-s -noreboot -noeula` 后仍弹出“NVIDIA 安装程序”界面且驱动仍报 512.15；需人工交互。未安装 CUDA build、未声称驱动升级成功，不重启。
+- **安全决策：**不在此安装阶段的界面上进行自动确认、不触发重启。保留官方签名安装包、DriverStore 导出包和 b12774 Vulkan 备份；后续在人工完成安装并确认 `nvidia-smi` 版本变化后，再安装/验证 CUDA b12774。
+- **后续风险：**启动使用 Vulkan 备份的单实例加载在当前后台状态下未完成模型初始化（10GiB working set、GPU 约1GiB、health 503）；已停止仅由本轮启动的 PID 24740。原 PA-002 和其它用户应用未停止。
+- **原始证据：**本机 `D:\PoJiaAI\drivers\pa003`、`D:\PoJiaAI\runtime-vulkan-b12774-backup`、`D:\PoJiaAI\logs\pa003\stage4-vulkan-rsn.*.log`。
+
+## 2026-11-27 — Stage 4/5 probe preparation (not accepted)
+
+- **决策：**独立探针新增 `--probe` 选项，支持单独运行 text / reasoning / json / vision，并可传入 768px 图片；不得改 `app/` 业务代码。对照任务书 reasoning 参数顺序，并记录完整 backend content 与 `\n\n` 分隔符，而非仅隐藏或截断字符串。
+- **验证：**`python -m py_compile tests/run_pa003_probes.py`、`--help` 和 `git diff --check` 成功；这些属于脚本检查，不是模型验收。由于驱动安装器要求人工交互、模型备用启动未就绪，Stage 4/5 的 PA-003 推理尚未重新实测，视觉/Reasoning 仍为待运行。
+- **回滚：**探针更改独立于 `app/`；启动失败时停止唯一 PA-003 进程，保留 PA-002 运行时及原有应用。
