@@ -11,11 +11,12 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
-from runtime import Runtime, IncompleteGeneration, build_context, continuation_overlap
+from runtime import Runtime, MODEL_PROFILES, IncompleteGeneration, continuation_overlap
 from store import Store
 from settings_store import SettingsStore, DEFAULTS as DEFAULT_SETTINGS
 from computer_agent import ComputerAgent, ToolRejected
-from bootstrap import check_model_dir, download as download_model, install_llama
+from bootstrap import check_model_dir, download as download_model
+from tool_permissions import ToolPermissionsStore, TOOL_IDS
 
 APP = "破甲 AI"
 ROOT = Path(os.environ.get("POJIA_HOME", r"D:\PoJiaAI"))
@@ -33,11 +34,14 @@ class Workbench(tk.Tk):
         self.configure(bg="#f6f7fb")
         self.store = Store(DATA)
         self.settings_store=SettingsStore(DATA/"settings")
+        self.tool_permissions_store=ToolPermissionsStore(DATA/"settings"/"tool-permissions.json")
+        try:self.enabled_computer_tools=self.tool_permissions_store.load();self.tool_permissions_error=None
+        except ValueError as exc:self.enabled_computer_tools=set();self.tool_permissions_error=str(exc)
         try:
             self.settings=self.settings_store.load();self.settings_error=None
         except ValueError as exc:
             self.settings=dict(DEFAULT_SETTINGS);self.settings_error=str(exc)
-        self.runtime = Runtime(ROOT, MODELS)
+        self.runtime = Runtime(ROOT, MODELS, self.settings["runtime_profile"])
         self.session = None
         self.image = None
         self.worker_proc = None
@@ -58,8 +62,11 @@ class Workbench(tk.Tk):
         self.after(1200, self.refresh)
 
     def auto_start_runtime(self):
-        if (ROOT/"runtime"/"llama-server.exe").exists():
+        state=self.runtime.status()
+        if state=="stopped" and (ROOT/self.runtime.profile["runtime"]/"llama-server.exe").exists():
             self.background(self.start_runtime)
+        elif state=="foreign":
+            self.logline("发现独立运行的模型服务；其模型配置与当前选择不同，未尝试停止或接管。")
 
     def _style(self):
         s = ttk.Style(self)
@@ -105,10 +112,10 @@ class Workbench(tk.Tk):
         self.chat_status=tk.StringVar(value="就绪")
         ttk.Label(f,textvariable=self.chat_status,wraplength=850).pack(anchor="w")
         budget=ttk.Frame(f);budget.pack(fill="x",pady=(0,6))
-        ttk.Label(budget,text="上下文字符预算").pack(side="left")
-        self.context_budget=tk.IntVar(value=self.settings["context_budget_chars"])
-        ttk.Spinbox(budget,from_=1000,to=48000,increment=1000,width=8,textvariable=self.context_budget,command=self.update_context_estimate).pack(side="left",padx=6)
-        self.context_usage=tk.StringVar(value="估算：0 字符（约 0 tokens）")
+        ttk.Label(budget,text="输入上下文预算（tokens）").pack(side="left")
+        self.context_budget=tk.IntVar(value=self.settings["context_budget_tokens"])
+        ttk.Spinbox(budget,from_=512,to=16000,increment=256,width=8,textvariable=self.context_budget,command=self.update_context_estimate).pack(side="left",padx=6)
+        self.context_usage=tk.StringVar(value="使用模型分词器计算中…")
         ttk.Label(budget,textvariable=self.context_usage,style="Sub.TLabel").pack(side="left",padx=8)
         self.auto_continue=tk.BooleanVar(value=self.settings["auto_continue"])
         ttk.Checkbutton(budget,text="长度截断后自动续写（仅文字）",variable=self.auto_continue,
@@ -148,12 +155,19 @@ class Workbench(tk.Tk):
         row=ttk.Frame(f);row.pack(fill="x",pady=5)
         ttk.Button(row,text="选择授权工作目录",command=self.pick_computer_workspace).pack(side="left")
         ttk.Button(row,text="加入本次白名单程序",command=self.pick_computer_app).pack(side="left",padx=6)
+        ttk.Button(row,text="独立工具权限",command=self.edit_computer_tool_permissions).pack(side="left",padx=4)
         self.computer_apps_label=tk.StringVar(value="本次任务尚未允许启动任何程序")
         ttk.Label(row,textvariable=self.computer_apps_label,style="Sub.TLabel").pack(side="left",padx=8)
         self.computer_prompt=tk.Text(f,height=3,wrap="word",font=("Microsoft YaHei UI",10));self.computer_prompt.pack(fill="x",pady=(8,4))
         actions=ttk.Frame(f);actions.pack(fill="x")
         ttk.Button(actions,text="让本地模型规划一步",style="Accent.TButton",command=self.plan_computer_action).pack(side="left")
         ttk.Button(actions,text="批准并执行预览",command=self.execute_computer_plan).pack(side="left",padx=8)
+        ttk.Button(actions,text="暂停",command=self.pause_computer_task).pack(side="left",padx=3)
+        ttk.Button(actions,text="继续",command=self.resume_computer_task).pack(side="left",padx=3)
+        ttk.Button(actions,text="停止任务",command=self.stop_computer_task).pack(side="left",padx=3)
+        ttk.Button(actions,text="新建任务",command=self.new_computer_task).pack(side="left",padx=3)
+        ttk.Button(actions,text="撤销全部应用授权",command=self.revoke_computer_apps).pack(side="right")
+        ttk.Button(actions,text="查看审计记录",command=self.view_computer_audit).pack(side="right",padx=6)
         self.computer_status=tk.StringVar(value="安全模式：没有可执行 shell；安全验证和第三方交易不支持自动化。")
         ttk.Label(f,textvariable=self.computer_status,wraplength=850).pack(anchor="w",pady=6)
         self.computer_preview=tk.Text(f,height=8,wrap="word",bg="white",font=("Consolas",9),state="disabled");self.computer_preview.pack(fill="both",expand=True)
@@ -192,27 +206,35 @@ class Workbench(tk.Tk):
         ttk.Button(row,text="预览 / 编辑审核",command=self.review_sample).pack(side="left")
 
     def page_models(self,f):
-        self.header(f,"模型管理","本机独立存储；运行时仅绑定 127.0.0.1。")
+        self.header(f,"模型管理","统一推理队列服务对话、编程、视觉和 Agent；模型与运行时只绑定 127.0.0.1。")
         self.model_info=tk.Text(f,height=10,bg="white",bd=0,font=("Microsoft YaHei UI",10));self.model_info.pack(fill="x")
-        self.model_info.insert("end",f"模型目录：{MODELS}\n运行时：{ROOT / 'runtime'}\n模型：Inkling-2-Mini AD-IQ3_S\n视觉组件：mmproj F16\n状态：按启动检查结果更新\n")
+        self.profile_var=tk.StringVar(value=self.settings["runtime_profile"])
         row=ttk.Frame(f);row.pack(fill="x",pady=12)
+        ttk.Label(row,text="配置").pack(side="left")
+        self.profile_combo=ttk.Combobox(row,textvariable=self.profile_var,state="readonly",width=34,
+                                        values=[f"{key} — {value['label']}" for key,value in MODEL_PROFILES.items()])
+        self.profile_combo.pack(side="left",padx=6)
+        self.profile_combo.set(f"{self.settings['runtime_profile']} — {MODEL_PROFILES[self.settings['runtime_profile']]['label']}")
+        ttk.Button(row,text="应用配置",command=self.apply_runtime_profile).pack(side="left",padx=4)
         ttk.Button(row,text="启动模型服务",style="Accent.TButton",command=lambda:self.background(self.start_runtime)).pack(side="left")
-        ttk.Button(row,text="停止并释放资源",command=self.runtime.stop).pack(side="left",padx=8)
-        ttk.Button(row,text="下载并校验模型",command=lambda:self.background(self.bootstrap_all)).pack(side="left")
+        ttk.Button(row,text="停止并释放资源",command=self.stop_runtime).pack(side="left",padx=8)
+        ttk.Button(row,text="校验 / 下载所选模型",command=lambda:self.background(self.bootstrap_all)).pack(side="left")
         ttk.Button(row,text="打开模型目录",command=lambda:os.startfile(MODELS) if MODELS.exists() else None).pack(side="left")
         self.model_log=tk.Text(f,bg="white",bd=0);self.model_log.pack(fill="both",expand=True)
 
     def bootstrap_all(self):
         try:
             self.after(0,lambda:self.model_log.insert("end","\n校验或下载模型中…\n"))
-            ok=check_model_dir()
+            model_name=self.runtime.profile["model"]
+            ok=check_model_dir(model_name)
             if not ok:
                 def progress(name,done,total):
                     pct=(done/total*100) if total else 0
                     self.after(0,lambda:self.model_log.insert("end",f"\r{name}: {done/1024**3:.2f}/{total/1024**3:.2f} GiB ({pct:.1f}%)"))
-                download(progress=progress)
-            exe=install_llama(progress=lambda n,d,t:self.after(0,lambda:self.model_log.insert("end",f"\n运行时 {n}: {d/1024**2:.1f}/{t/1024**2:.1f} MiB")))
-            self.after(0,lambda:messagebox.showinfo(APP,f"模型、SHA-256 校验和运行时已完成。\n{exe}"))
+                download(progress=progress,model_name=model_name)
+            exe=ROOT/self.runtime.profile["runtime"]/"llama-server.exe"
+            if not exe.exists():raise FileNotFoundError(f"所选 {self.runtime.profile['backend']} 运行时不存在：{exe}；不会静默替换为其他后端")
+            self.after(0,lambda:messagebox.showinfo(APP,f"所选模型与视觉组件 SHA-256 校验通过；运行时文件存在。\n{exe}"))
         except Exception as e:self.after(0,lambda:messagebox.showerror(APP,f"安装失败：{e}"))
 
     def page_monitor(self,f):
@@ -229,14 +251,18 @@ class Workbench(tk.Tk):
         self.system_prompt_editor=tk.Text(f,height=4,wrap="word",font=("Microsoft YaHei UI",9))
         self.system_prompt_editor.pack(fill="x")
         self.system_prompt_editor.insert("1.0",self.settings["system_prompt"])
+        ttk.Label(f,text="行为规则（逐条写入、只影响模型提示；执行器仍会独立校验权限）").pack(anchor="w",pady=(7,3))
+        self.behavior_rules_editor=tk.Text(f,height=3,wrap="word",font=("Microsoft YaHei UI",9))
+        self.behavior_rules_editor.pack(fill="x")
+        self.behavior_rules_editor.insert("1.0",self.settings["behavior_rules"])
         behavior=ttk.Frame(f);behavior.pack(fill="x",pady=5)
-        ttk.Label(behavior,text="上下文预算字符").pack(side="left")
-        ttk.Spinbox(behavior,from_=1000,to=48000,increment=1000,width=8,textvariable=self.context_budget).pack(side="left",padx=5)
+        ttk.Label(behavior,text="上下文预算 tokens").pack(side="left")
+        ttk.Spinbox(behavior,from_=512,to=16000,increment=256,width=8,textvariable=self.context_budget).pack(side="left",padx=5)
         ttk.Checkbutton(behavior,text="允许文字自动续写",variable=self.auto_continue).pack(side="left",padx=8)
         ttk.Label(behavior,text="续写次数上限").pack(side="left")
         ttk.Spinbox(behavior,from_=1,to=4,width=3,textvariable=self.auto_continue_limit).pack(side="left",padx=5)
         ttk.Button(behavior,text="校验并应用",command=self.apply_behavior_settings).pack(side="left",padx=6)
-        ttk.Button(behavior,text="回滚上一版",command=self.rollback_behavior_settings).pack(side="left")
+        ttk.Button(behavior,text="版本差异 / 指定回滚",command=self.settings_version_history).pack(side="left")
         self.settings_status=tk.StringVar(value=self.settings_error or f"配置版本 {self.settings['revision']}；自动续写默认按用户选择运行。")
         ttk.Label(f,textvariable=self.settings_status,style="Sub.TLabel",wraplength=820).pack(anchor="w",pady=3)
         ttk.Label(f,text="长期记忆（仅保存你明确添加的内容；校正会保留旧版本）").pack(anchor="w",pady=(8,3))
@@ -281,12 +307,15 @@ class Workbench(tk.Tk):
     def apply_behavior_settings(self):
         candidate={"schema_version":1,"revision":self.settings.get("revision",0),
                    "system_prompt":self.system_prompt_editor.get("1.0","end").strip(),
-                   "context_budget_chars":self.context_budget.get(),
+                   "behavior_rules":self.behavior_rules_editor.get("1.0","end").strip(),
+                   "runtime_profile":self.settings["runtime_profile"],
+                   "context_budget_tokens":self.context_budget.get(),
                    "auto_continue":self.auto_continue.get(),
                    "auto_continue_limit":self.auto_continue_limit.get()}
         try:
             self.settings=self.settings_store.save(candidate);self.settings_error=None
             self.system_prompt=self.settings["system_prompt"]
+            self.behavior_rules=self.settings["behavior_rules"]
             self.settings_status.set(f"已应用版本 {self.settings['revision']}；角色指令从下一轮生效。")
             self.update_context_estimate()
         except (ValueError,OSError,tk.TclError) as exc:
@@ -299,9 +328,11 @@ class Workbench(tk.Tk):
         if not selected:return
         try:
             self.computer_workspace=Path(selected).resolve(strict=True)
-            self.computer_agent=ComputerAgent(self.computer_workspace)
+            key=__import__("hashlib").sha256(str(self.computer_workspace).encode("utf-8")).hexdigest()[:20]
+            self.computer_agent=ComputerAgent(self.computer_workspace,checkpoint_path=DATA/"computer-agent"/(key+".json"),allowed_actions=self.enabled_computer_tools)
+            if not self.computer_agent.restore_checkpoint():self.computer_agent.begin_task()
             self.computer_workspace_label.set(f"本次授权目录：{self.computer_workspace}")
-            self.computer_status.set("工作目录已授权；默认无应用启动权限。")
+            self.computer_status.set(f"任务状态：{self.computer_agent.state}；已完成 {self.computer_agent.steps}/{self.computer_agent.max_steps} 步；恢复任务需重新授权应用。")
             self.computer_plan_value=None
         except (OSError,ValueError) as exc:messagebox.showerror(APP,str(exc))
 
@@ -317,6 +348,65 @@ class Workbench(tk.Tk):
             self.computer_apps_label.set("；".join(f"{key[:6]}={p.name}" for key,p in self.computer_app_ids.items()))
             self.computer_status.set("程序权限仅对本次工作台会话有效。")
         except (OSError,ToolRejected) as exc:messagebox.showerror(APP,str(exc))
+
+    def edit_computer_tool_permissions(self):
+        window=tk.Toplevel(self);window.title("独立工具权限");window.transient(self);window.grab_set()
+        labels={"list_windows":"列出白名单窗口","inspect_window":"读取窗口控件","read_control_text":"读取控件文本","read_text":"读取工作区文本","write_text":"写入工作区文本（每次审批）","launch_app":"启动白名单程序（每次审批）","click_control":"点击白名单控件（每次审批）","type_text":"向文本框输入（每次审批）"}
+        ttk.Label(window,text="权限独立于系统提示词；停用项由执行器直接拒绝。",wraplength=420).pack(anchor="w",padx=16,pady=12)
+        variables={}
+        for tool in TOOL_IDS:
+            var=tk.BooleanVar(value=tool in self.enabled_computer_tools);variables[tool]=var
+            ttk.Checkbutton(window,text=labels[tool],variable=var).pack(anchor="w",padx=20,pady=3)
+        if self.tool_permissions_error:ttk.Label(window,text=self.tool_permissions_error,foreground="#b33").pack(anchor="w",padx=16)
+        def apply():
+            selected={key for key,var in variables.items() if var.get()}
+            try:
+                self.enabled_computer_tools=self.tool_permissions_store.save(selected)
+                if self.computer_agent:self.computer_agent.set_allowed_actions(selected)
+                self.tool_permissions_error=None
+                if self.computer_agent:self.computer_status.set(f"独立工具权限已应用：{len(selected)} 项；待执行计划已清除。")
+                window.destroy()
+            except (ValueError,ToolRejected,OSError) as exc:messagebox.showerror(APP,str(exc),parent=window)
+        ttk.Button(window,text="应用权限",command=apply).pack(anchor="e",padx=16,pady=12)
+
+    def view_computer_audit(self):
+        if not self.computer_agent or not self.computer_agent.audit_path or not self.computer_agent.audit_path.exists():
+            return messagebox.showinfo(APP,"尚无本次工作区的 Agent 审计记录。")
+        try:
+            raw=self.computer_agent.audit_path.read_text(encoding="utf-8")
+            if len(raw)>2_000_000:raise ValueError("审计记录超过 2 MiB，暂不在窗口中展开。")
+            window=tk.Toplevel(self);window.title("本地 Agent 审计记录");window.geometry("900x600")
+            box=tk.Text(window,wrap="none",font=("Consolas",9),state="normal");box.pack(fill="both",expand=True)
+            box.insert("1.0",raw);box.configure(state="disabled")
+        except (OSError,ValueError) as exc:messagebox.showerror(APP,str(exc))
+
+    def pause_computer_task(self):
+        if self.computer_agent and self.computer_agent.pause():
+            self.computer_plan_value=None
+            self.computer_status.set("任务已暂停；待审批计划已失效，正在执行的单步结束后不会继续。")
+
+    def resume_computer_task(self):
+        if self.computer_agent and self.computer_agent.resume():
+            self.computer_status.set(f"任务已继续；步骤 {self.computer_agent.steps}/{self.computer_agent.max_steps}。")
+
+    def stop_computer_task(self):
+        if self.computer_agent and self.computer_agent.stop():
+            self.computer_plan_value=None
+            self.computer_status.set("紧急停止已设置；当前 UIA 单步可能完成，但后续计划与审批已撤销。")
+
+    def new_computer_task(self):
+        if not self.computer_agent:return messagebox.showinfo(APP,"请先选择工作目录。")
+        if self.computer_busy:return messagebox.showwarning(APP,"当前单步仍在运行，等待其结束后再开始新任务。")
+        if not messagebox.askyesno(APP,"开始新任务并清除本任务待执行计划？",parent=self):return
+        self.computer_agent.begin_task();self.computer_plan_value=None
+        self.computer_status.set(f"新任务已开始；上限 {self.computer_agent.max_steps} 步。")
+
+    def revoke_computer_apps(self):
+        if not self.computer_agent:return
+        if not messagebox.askyesno(APP,"撤销本任务全部应用授权并暂停任务？",parent=self):return
+        self.computer_agent.revoke_all();self.computer_app_ids.clear();self.computer_plan_value=None
+        self.computer_apps_label.set("本次任务尚未允许启动任何程序")
+        self.computer_status.set("应用白名单已清空，待执行计划与审批均已失效。")
 
     def plan_computer_action(self):
         if self.computer_busy:return
@@ -382,20 +472,64 @@ class Workbench(tk.Tk):
     def _show_computer_result(self,result):
         self.computer_busy=False
         self.computer_preview.configure(state="normal");self.computer_preview.insert("end","\n\nRESULT\n"+json.dumps(result,ensure_ascii=False,indent=2,default=str));self.computer_preview.see("end");self.computer_preview.configure(state="disabled")
-        self.computer_status.set("单步执行结束；查看实际结果后再请求下一步。")
+        self.computer_status.set(f"单步结束；任务状态 {self.computer_agent.state}，步骤 {self.computer_agent.steps}/{self.computer_agent.max_steps}。检查结果后再请求下一步。")
 
     def rollback_behavior_settings(self):
         try:
             self.settings=self.settings_store.rollback()
+            self.runtime.set_profile(self.settings["runtime_profile"])
+            self.profile_combo.set(f"{self.settings['runtime_profile']} — {MODEL_PROFILES[self.settings['runtime_profile']]['label']}")
             self.system_prompt_editor.delete("1.0","end")
             self.system_prompt_editor.insert("1.0",self.settings["system_prompt"])
             self.system_prompt=self.settings["system_prompt"]
-            self.context_budget.set(self.settings["context_budget_chars"])
+            self.behavior_rules_editor.delete("1.0","end")
+            self.behavior_rules_editor.insert("1.0",self.settings["behavior_rules"])
+            self.behavior_rules=self.settings["behavior_rules"]
+            self.context_budget.set(self.settings["context_budget_tokens"])
             self.auto_continue.set(self.settings["auto_continue"])
             self.auto_continue_limit.set(self.settings["auto_continue_limit"])
             self.settings_status.set(f"已回滚并应用为新版本 {self.settings['revision']}。")
             self.update_context_estimate()
         except (ValueError,OSError) as exc:
+            messagebox.showerror(APP,str(exc))
+
+    def settings_version_history(self):
+        try:
+            versions=self.settings_store.versions()
+            if not versions:return messagebox.showinfo(APP,"尚无配置版本历史。")
+            choices=[row["revision"] for row in versions]
+            selected=simpledialog.askinteger(APP,"输入要比较或恢复的版本号：\n可用版本："+", ".join(map(str,choices)),
+                                             minvalue=0,maxvalue=max(choices),parent=self)
+            if selected is None:return
+            diff=self.settings_store.diff(selected)
+            messagebox.showinfo(APP,(diff or "所选版本与当前配置相同")[:3500],parent=self)
+            current=self.settings_store.load()
+            if selected!=current["revision"] and messagebox.askyesno(APP,f"将版本 {selected} 恢复为新版本？",parent=self):
+                self.settings=self.settings_store.rollback_to(selected)
+                self.system_prompt=self.settings["system_prompt"]
+                self.behavior_rules=self.settings["behavior_rules"]
+                self.settings_status.set(f"已恢复版本 {selected} 的配置内容，新版本号为 {self.settings['revision']}。")
+        except (ValueError,OSError) as exc:messagebox.showerror(APP,str(exc))
+
+    def apply_runtime_profile(self):
+        raw=self.profile_combo.get()
+        profile_id=raw.split(" — ",1)[0]
+        try:
+            old_profile=self.runtime.profile_id
+            self.runtime.set_profile(profile_id)
+            candidate=dict(self.settings,runtime_profile=profile_id)
+            candidate["context_budget_tokens"]=min(candidate["context_budget_tokens"],self.runtime.context_size-512)
+            try:self.settings=self.settings_store.save(candidate)
+            except Exception:
+                self.runtime.set_profile(old_profile)
+                raise
+            self.context_budget.set(self.settings["context_budget_tokens"])
+            self.model_info.delete("1.0","end")
+            p=self.runtime.profile
+            self.model_info.insert("end",f"配置：{profile_id}（{p['label']}）\n后端：{p['backend']}\n模型：{p['model']}\n运行时：{ROOT / p['runtime']}\n模型目录：{MODELS}\n视觉组件：mmproj F16\n输入预算：{self.settings['context_budget_tokens']} tokens；输出预留 512 tokens\n"
+                f"当前端口服务状态：{self.runtime.status()}\n若服务载入了其他模型，请先在模型管理中正常停止该服务，再启动所选配置。")
+            self.settings_status.set(f"推理配置已存为版本 {self.settings['revision']}；服务重启后生效。")
+        except Exception as exc:
             messagebox.showerror(APP,str(exc))
 
     def show(self,key):
@@ -417,12 +551,21 @@ class Workbench(tk.Tk):
             self.runtime.start();self.after(0,lambda:messagebox.showinfo(APP,"本地模型服务已就绪。"))
         except Exception as e:self.after(0,lambda:messagebox.showerror(APP,str(e)))
 
+    def stop_runtime(self):
+        try:
+            self.runtime.stop()
+            messagebox.showinfo(APP,"本应用启动的推理服务已正常停止。")
+        except Exception as exc:messagebox.showerror(APP,str(exc))
+
     def refresh(self):
-        state=self.runtime.status();color={"ready":"#39b778","loading":"#e6aa38","stopped":"#e6aa38"}.get(state,"#e05252")
-        text={"ready":"● 模型就绪","loading":"● 模型加载中","stopped":"● 模型未启动"}.get(state,"● 模型异常")
+        state=self.runtime.status();color={"ready":"#39b778","loading":"#e6aa38","stopped":"#e6aa38","foreign":"#e05252"}.get(state,"#e05252")
+        text={"ready":"● 模型就绪","loading":"● 模型加载中","stopped":"● 模型未启动","foreign":"● 端口模型与所选配置不匹配"}.get(state,"● 模型异常")
         self.status_dot.configure(text=text,fg=color)
         if hasattr(self,"model_log") and self.pages["models"].winfo_ismapped():
-            self.model_log.delete("1.0","end");self.model_log.insert("end",f"服务状态：{state}\n回环地址：{self.runtime.base}\n模型已存在：{(MODELS/'Inkling-2-Mini-Uncensored-AD-IQ3_S.gguf').exists()}\n视觉组件已存在：{(MODELS/'mmproj-Inkling-2-Mini-Uncensored-F16.gguf').exists()}\n")
+            self.model_info.delete("1.0","end")
+            p=self.runtime.profile
+            self.model_info.insert("end",f"配置：{self.runtime.profile_id}（{p['label']}）\n后端：{p['backend']}\n模型：{p['model']}\n运行时：{ROOT/p['runtime']}\n模型与视觉文件：{MODELS}\n服务状态：{state}；回环地址：{self.runtime.base}\n输入预算：{self.settings['context_budget_tokens']} tokens，另预留 512 tokens 输出。\n")
+            self.model_log.delete("1.0","end");self.model_log.insert("end",f"模型文件存在（启动前执行完整 SHA-256 校验）：{(MODELS/p['model']).exists()}\n视觉组件文件存在（启动前执行完整 SHA-256 校验）：{(MODELS/'mmproj-Inkling-2-Mini-Uncensored-F16.gguf').exists()}\n")
         self.after(2500,self.refresh)
 
     def new_session(self):
@@ -470,12 +613,25 @@ class Workbench(tk.Tk):
             messages=[dict(m) for m in self.store.messages(self.session)]
             if self.store.draft(self.session):
                 messages.append({"role":"assistant","content":self.store.draft(self.session)["content"]})
-            budget=max(1000,min(48000,int(self.context_budget.get())))
-            selected=build_context(messages,budget)
-            chars=sum(len(m["content"]) for m in selected)
-            # Chinese-heavy prompts vary by tokenizer; show a range, not a false exact count.
-            low=(chars+3)//4;high=chars
-            self.context_usage.set(f"当前请求窗口：{chars}/{budget} 字符；估算 {low}–{high} tokens（非 tokenizer 精确值）")
+            budget=max(512,min(self.runtime.context_size-512,int(self.context_budget.get())))
+            messages.insert(0,{"role":"system","content":self.settings["system_prompt"]})
+            rules=self.settings.get("behavior_rules","").strip()
+            if rules:messages.insert(1,{"role":"system","content":"用户设置的行为规则：\n"+rules})
+            if getattr(self,"_context_check_busy",False):return
+            self._context_check_busy=True
+            sid=self.session;image=self.image
+            self.context_usage.set("使用当前模型 chat template 与 tokenizer 计算…")
+            def count():
+                try:
+                    selected=self.runtime.build_context(messages,budget,image_path=image)
+                    tokens=self.runtime.count_tokens(selected,image_path=image)
+                    detail=f"精确输入 {tokens}/{budget} tokens（输出预留 512；上下文 {self.runtime.context_size}）"
+                except Exception as exc:detail=f"无法精确计数：{type(exc).__name__}；发送时仍会做强制预算校验。"
+                def update():
+                    self._context_check_busy=False
+                    if self.session==sid and hasattr(self,"context_usage"):self.context_usage.set(detail)
+                self.after(0,update)
+            self.background(count)
         except (ValueError,tk.TclError):
             self.context_usage.set("上下文预算无效")
 
@@ -534,6 +690,11 @@ class Workbench(tk.Tk):
         except (ValueError,tk.TclError):continuation_limit=2
         cancel=threading.Event()
         self.cancel=cancel
+        try:
+            context_budget=max(512,min(self.runtime.context_size-512,int(self.context_budget.get())))
+        except (ValueError,tk.TclError):
+            context_budget=min(3072,self.runtime.context_size-512)
+        behavior_rules=self.settings.get("behavior_rules","").strip()
         self.chat_status.set("检查本地模型服务…")
         def run():
             content=""
@@ -562,12 +723,14 @@ class Workbench(tk.Tk):
                     messages.insert(0,{"role":"system","content":system_prompt})
                     if memories:
                         messages.insert(1,{"role":"system","content":"以下是用户确认的长期记忆，仅在与当前请求相关时使用；如与当前明确指令冲突，以当前指令为准：\n- " + "\n- ".join(memories)})
-                    budget=max(1000,min(48000,int(self.context_budget.get())))
-                    messages=build_context(messages,budget)
+                    budget=max(512,min(self.runtime.context_size-512,int(self.context_budget.get())))
+                    if behavior_rules:
+                        messages.insert(1,{"role":"system","content":"用户设置的行为规则：\n"+behavior_rules})
+                    messages=self.runtime.build_context(messages,context_budget,image_path=image)
                     label=(f"续写中（{continuation_count}/{continuation_limit}）…"
                            if continuation_count else "生成中…")
                     self.chat_events.put((sid,"status",label))
-                    stream=self.runtime.chat(messages,image,stream=True,max_tokens=512,timeout=120)
+                    stream=self.runtime.chat(messages,image,stream=True,max_tokens=512,timeout=120,cancel_event=cancel)
                     reason=None;previous_content=content;segment_content=""
                     check_overlap=bool(previous_content) or continuation_count>0
                     try:
@@ -649,7 +812,7 @@ class Workbench(tk.Tk):
         def run():
             try:
                 from vision_pipeline import analyze
-                started=time.perf_counter();data=analyze(self.image)
+                started=time.perf_counter();data=analyze(self.image,lease_path=DATA/"inference.lock")
                 added,digest=self.store.import_image(self.image,source="人工选择")
                 if added or (row:=self.store.sample(digest[:24])) and not row["category"]:
                     self.store.annotate_sample(digest[:24],data["page_type"],data["ocr"],data["labels"],data["needs_human_review"])

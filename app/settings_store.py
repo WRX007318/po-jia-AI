@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 import time
+import difflib
 from pathlib import Path
 
 
@@ -12,7 +13,9 @@ DEFAULTS = {
     "schema_version": 1,
     "revision": 0,
     "system_prompt": "你是破甲 AI，本地运行的中文助手。清楚区分已验证事实与推测；不要声称执行了未实际完成的操作。",
-    "context_budget_chars": 12000,
+    "behavior_rules": "",
+    "runtime_profile": "iq2_m_cuda",
+    "context_budget_tokens": 3072,
     "auto_continue": False,
     "auto_continue_limit": 2,
 }
@@ -28,6 +31,14 @@ class SettingsStore:
     def validate(value: dict) -> dict:
         if not isinstance(value, dict):
             raise ValueError("设置必须是 JSON 对象")
+        # Migrate the PA-004 character budget once; all later enforcement uses
+        # the active model server's real tokenizer rather than this estimate.
+        value=dict(value)
+        legacy_budget=value.pop("context_budget_chars",None)
+        if "context_budget_tokens" not in value and legacy_budget is not None:
+            if not isinstance(legacy_budget,int) or isinstance(legacy_budget,bool):
+                raise ValueError("旧版上下文预算无效")
+            value["context_budget_tokens"]=max(512,min(16000,(legacy_budget+3)//4))
         allowed = set(DEFAULTS)
         if set(value) - allowed:
             raise ValueError("设置包含未知字段")
@@ -40,9 +51,14 @@ class SettingsStore:
         prompt = merged["system_prompt"]
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 8000:
             raise ValueError("角色指令必须为 1–8000 个字符")
-        budget = merged["context_budget_chars"]
-        if not isinstance(budget, int) or isinstance(budget, bool) or not 1000 <= budget <= 48000:
-            raise ValueError("上下文预算必须在 1000–48000 字符之间")
+        rules=merged["behavior_rules"]
+        if not isinstance(rules,str) or len(rules)>8000:
+            raise ValueError("行为规则必须为不超过 8000 个字符的文本")
+        if merged["runtime_profile"] not in {"iq2_m_cuda","iq3_s_cuda","iq3_s_vulkan"}:
+            raise ValueError("推理配置必须选择 IQ2_M CUDA、IQ3_S CUDA 或 IQ3_S Vulkan")
+        budget = merged["context_budget_tokens"]
+        if not isinstance(budget, int) or isinstance(budget, bool) or not 512 <= budget <= 16000:
+            raise ValueError("上下文预算必须在 512–16000 tokens 之间")
         if not isinstance(merged["auto_continue"], bool):
             raise ValueError("auto_continue 必须为布尔值")
         limit = merged["auto_continue_limit"]
@@ -92,8 +108,44 @@ class SettingsStore:
         candidates = sorted(self.history.glob("[0-9]*.json"), reverse=True) if self.history.exists() else []
         if not candidates:
             raise ValueError("没有可恢复的历史版本")
+        current=self.load()
+        return self.rollback_to(int(candidates[0].stem),current=current)
+
+    def versions(self):
+        """Return validated snapshots and the current version, newest first."""
+        values=[]
+        if self.history.exists():
+            for path in sorted(self.history.glob("[0-9]*.json"),reverse=True):
+                try:values.append(self.validate(json.loads(path.read_text(encoding="utf-8"))))
+                except (OSError,json.JSONDecodeError,ValueError):continue
+        try:current=self.load()
+        except ValueError:current=None
+        if current is not None:values.insert(0,current)
+        return values
+
+    def diff(self, revision: int) -> str:
+        target=self._read_revision(revision)
+        current=self.load()
+        before=json.dumps(target,ensure_ascii=False,indent=2,sort_keys=True).splitlines()
+        after=json.dumps(current,ensure_ascii=False,indent=2,sort_keys=True).splitlines()
+        return "\n".join(difflib.unified_diff(before,after,fromfile=f"revision {revision}",tofile=f"revision {current['revision']}",lineterm=""))
+
+    def _read_revision(self,revision: int):
+        if not isinstance(revision,int) or isinstance(revision,bool) or revision<0:
+            raise ValueError("版本号无效")
+        candidates=[self.history/f"{revision:06d}.json"]
+        if self.path.exists():candidates.append(self.path)
+        for path in candidates:
+            if path.exists():
+                try:
+                    value=self.validate(json.loads(path.read_text(encoding="utf-8")))
+                    if value["revision"]==revision:return value
+                except (OSError,json.JSONDecodeError,ValueError):continue
+        raise ValueError(f"找不到有效配置版本 {revision}")
+
+    def rollback_to(self,revision: int,current=None) -> dict:
         try:
-            previous = self.validate(json.loads(candidates[0].read_text(encoding="utf-8")))
-        except (OSError, json.JSONDecodeError, ValueError) as exc:
-            raise ValueError("最近历史版本无效；当前设置未更改") from exc
+            previous=self._read_revision(revision)
+        except ValueError as exc:raise ValueError("指定历史版本无效；当前设置未更改") from exc
+        if current is None:current=self.load()
         return self.save(previous)

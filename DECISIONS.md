@@ -1,5 +1,14 @@
 # PA-003 实施决策日志
 
+## 2026-11-27 — PA-005 local inference ownership and recovery
+
+- A single cross-process file lease serializes chat, visual analysis, and the independent visual worker against the shared llama.cpp slot.
+- The deployed b12774 build returns HTTP 501 for `POST /slots/0?action=cancel`; cancellable chat therefore uses the streaming endpoint and closes its owned HTTP response. The lease is released only after `/slots` reports idle. On delayed cancellation, a background waiter retains the lease rather than allowing overlapping GPU work.
+- The desktop checks the selected model identity and context against `/props`. A foreign, externally owned service is reported as a mismatch and is never stopped or adopted automatically.
+- Behavior settings support version comparison and rollback to a selected prior snapshot. Computer Agent events are recorded in a local append-only hash chain; an invalid chain fails closed before further logged actions.
+- Tool permissions live in a separate local allowlist enforced by `ComputerAgent.plan`; new installations default to read-only actions, while every mutating action continues to require a fresh plan-bound user approval.
+- Live IQ2_M acceptance remains blocked by an already-running externally owned IQ3_S server on the shared single slot. No driver change, model replacement, or forced process termination is permitted for this validation.
+
 ## 2026-11-27 — Stage 0 baseline
 
 - **证据：**RTX 3060 12 GiB、NVIDIA 512.15；可用 RAM 8.68 GiB（低于 16 GiB 提示线）；Vulkan llama.cpp b12774；唯一服务当前为 12 GPU 层 / 2048 context / 6 线程；GPU 可用 3264 MiB。
