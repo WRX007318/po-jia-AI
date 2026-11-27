@@ -10,7 +10,7 @@ Date: 2026-11-27. Branch: `feat/pa-004-chat-continuity`. All raw conversations a
 
 ## Automated regression
 
-`python -m unittest discover -s tests -v`: 24 tests passed. Includes stream completion/truncation, durable draft recovery, bounded context preservation, duplicate-boundary detection, confirmed-memory correction history, model integrity, and worker persistence tests. `py_compile` passed for the edited runtime, UI, store, and interruption harness.
+`python -m unittest discover -s tests -v`: 26 tests passed. Includes stream completion/truncation, durable draft recovery, bounded context preservation, duplicate-boundary detection, confirmed-memory correction history, versioned behavior settings/rollback, model integrity, and worker persistence tests. `compileall` passed for app and tests.
 
 ## Live 20-turn conversation
 
